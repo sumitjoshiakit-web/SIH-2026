@@ -1,0 +1,40 @@
+{
+  "name": "LegalMetriX Scanner",
+  "short_name": "LegalMetriX",
+  "description": "AI-assisted Legal Metrology packaged commodity compliance scanner for SIH 26034.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#172033",
+  "background_color": "#f5f7fb",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/scanner-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Scan Product",
+      "short_name": "Scan",
+      "description": "Open LegalMetriX Scanner directly for a new inspection.",
+      "url": "/?scan=1#scanner",
+      "icons": [
+        {
+          "src": "/scanner-icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}
