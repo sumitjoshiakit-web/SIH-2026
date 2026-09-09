@@ -66,11 +66,11 @@ function App() {
   function downloadReport() {
     const report = { productImage: file?.name || null, generatedAt: new Date().toISOString(), ocrConfidence: confidence, score, status, checks, extractedText: ocrText, note: 'Prototype screening report. Verify findings against the current applicable Legal Metrology rules/amendments before enforcement action.' };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `legalmetrix-report-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `legalmetrix-scanner-report-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
   }
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark">LM</span><div><b>LegalMetriX</b><small>SIH 26034 • Compliance Scanner</small></div></div><span className="official-chip">Inspector Mode</span></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark">LM</span><div><b>LegalMetriX Scanner</b><small>SIH 26034 • LegalMetriX Scanner</small></div></div><span className="official-chip">Inspector Mode</span></header>
     <main>
       <section className="hero"><div><p className="eyebrow">LEGAL METROLOGY • FIELD INSPECTION</p><h1>Scan. Validate. Explain.</h1><p>Capture a package label with your phone camera and check mandatory declarations in seconds.</p></div><div className="hero-flow"><span>01 Scan</span><span>02 OCR</span><span>03 Rules</span><span>04 Report</span></div></section>
 
@@ -95,7 +95,7 @@ function App() {
       <section className="panel history"><div className="panel-head"><div><h2>Inspection history</h2><p>Recent local scans.</p></div></div>{history.length === 0 ? <div className="empty">No scans yet. Your first inspection will appear here.</div> : <div className="history-list">{history.map(item => <div className="history-row" key={item.id}><span className="mini-file">IMG</span><div><b>{item.name}</b><small>{item.scannedAt}</small></div><strong>{item.score}%</strong></div>)}</div>}</section>
     </main>
     <nav className="mobile-nav"><button onClick={() => window.scrollTo({top:0, behavior:'smooth'})}>⌂<span>Scanner</span></button><button onClick={() => document.querySelector('.checklist')?.scrollIntoView({behavior:'smooth'})}>✓<span>Checks</span></button><button onClick={() => document.querySelector('.history')?.scrollIntoView({behavior:'smooth'})}>◷<span>History</span></button></nav>
-    <footer>LegalMetriX • SIH 26034 • Prototype for enforcement decision support</footer>
+    <footer>LegalMetriX Scanner • SIH 26034 • Prototype for enforcement decision support</footer>
   </div>;
 }
 
