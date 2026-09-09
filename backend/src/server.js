@@ -40,7 +40,7 @@ function evaluateText(text = '') {
   return { score, status, checks };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-api', version: '1.0.0' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '1.0.0' }));
 app.get('/api/rules', (_req, res) => res.json({ framework: 'Legal Metrology Packaged Commodities screening', rules: RULES.map(({ pattern, ...rule }) => rule) }));
 
 app.post('/api/inspections', upload.single('image'), (req, res) => {
@@ -61,4 +61,4 @@ app.post('/api/reports', (req, res) => {
   res.json({ reportId: crypto.randomUUID(), generatedAt: new Date().toISOString(), product: product || 'Unknown product', score, status, checks, extractedText });
 });
 
-app.listen(PORT, () => console.log(`LegalMetriX API running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`LegalMetriX Scanner API running on port ${PORT}`));
