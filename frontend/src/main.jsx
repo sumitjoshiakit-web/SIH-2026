@@ -53,14 +53,19 @@ function App() {
     if (!files.length) return;
     setBusy(true); setError('');
     try {
-      const result = await Tesseract.recognize(file, 'eng', {
-        logger: message => message.status === 'recognizing text' && setConfidence(Math.round((message.progress || 0) * 100)),
-      });
-      const text = result.data.text.trim();
-      setOcrText(text); setConfidence(Math.round(result.data.confidence || 0));
+      const results = [];
+      for (const currentFile of files) {
+        const result = await Tesseract.recognize(currentFile, 'eng', {
+          logger: message => message.status === 'recognizing text' && setConfidence(Math.round((message.progress || 0) * 100)),
+        });
+        results.push(result);
+      }
+      const text = results.map((r, i) => `[Photo ${i + 1}]\\n${r.data.text.trim()}`).join('\\n\\n');
+      const avgConfidence = Math.round(results.reduce((sum, r) => sum + (r.data.confidence || 0), 0) / results.length);
+      setOcrText(text); setConfidence(avgConfidence);
       const resultScore = Math.round((REQUIRED_FIELDS.filter(([key]) => FIELD_PATTERNS[key].test(text)).length / REQUIRED_FIELDS.length) * 100);
       setHistory(prev => [{ id: crypto.randomUUID(), name: `${files.length} photo${files.length > 1 ? 's' : ''} • ${files[0].name}`, score: resultScore, scannedAt: new Date().toLocaleString() }, ...prev].slice(0, 8));
-    } catch (e) { setError(e.message || 'OCR failed. Try a clearer label image.'); }
+    } catch (e) { setError(e.message || 'OCR failed. Try clearer label images.'); }
     finally { setBusy(false); }
   }
 
