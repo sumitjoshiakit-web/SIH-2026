@@ -42,12 +42,18 @@ function App() {
   const score = ocrText ? Math.round((passed / checks.length) * 100) : 0;
   const status = !ocrText ? 'Ready to scan' : score >= 85 ? 'Likely compliant' : score >= 60 ? 'Needs review' : 'Potential non-compliance';
 
-  function handleFile(selected) {
-    if (!selected) return;
-    if (!selected.type.startsWith('image/')) { setError('Please select a JPG, PNG or other image file.'); return; }
-    setError(''); setFile(selected); setOcrText(''); setConfidence(0);
-    setPreview(URL.createObjectURL(selected));
+  function handleFiles(selectedFiles) {
+    const incoming = Array.from(selectedFiles || []).filter(f => f.type.startsWith('image/'));
+    if (!incoming.length) { setError('Please select one or more JPG/PNG image files.'); return; }
+    setError('');
+    setFiles(prev => [...prev, ...incoming].slice(0, 8));
+    setOcrText(''); setConfidence(0);
   }
+
+  function removePhoto(index) {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
 
   async function scan() {
     if (!files.length) return;
