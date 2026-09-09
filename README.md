@@ -1,4 +1,4 @@
-# LegalMetriX — SIH 26034
+# LegalMetriX Scanner — SIH 26034
 
 Software System to check compliance of packaged commodities under the Legal Metrology (Packaged Commodities) Rules, 2011 by scanning product images and labels.
 
@@ -8,7 +8,7 @@ Software System to check compliance of packaged commodities under the Legal Metr
 - **Department:** Department of Consumer Affairs
 
 ## Proposed Solution
-LegalMetriX combines OCR, image evidence, a versioned rule engine and inspection history to help enforcement officials screen packaged commodities.
+LegalMetriX Scanner combines OCR, image evidence, a versioned rule engine and inspection history to help enforcement officials screen packaged commodities.
 
 ### Core flow
 1. Upload/capture package label images.
