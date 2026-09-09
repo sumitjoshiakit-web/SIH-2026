@@ -25,6 +25,7 @@ const FIELD_PATTERNS = {
 
 function App() {
   const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState('');
   const [ocrText, setOcrText] = useState('');
   const [confidence, setConfidence] = useState(0);
@@ -49,7 +50,7 @@ function App() {
   }
 
   async function scan() {
-    if (!file) return;
+    if (!files.length) return;
     setBusy(true); setError('');
     try {
       const result = await Tesseract.recognize(file, 'eng', {
@@ -58,13 +59,13 @@ function App() {
       const text = result.data.text.trim();
       setOcrText(text); setConfidence(Math.round(result.data.confidence || 0));
       const resultScore = Math.round((REQUIRED_FIELDS.filter(([key]) => FIELD_PATTERNS[key].test(text)).length / REQUIRED_FIELDS.length) * 100);
-      setHistory(prev => [{ id: crypto.randomUUID(), name: file.name, score: resultScore, scannedAt: new Date().toLocaleString() }, ...prev].slice(0, 8));
+      setHistory(prev => [{ id: crypto.randomUUID(), name: `${files.length} photo${files.length > 1 ? 's' : ''} • ${files[0].name}`, score: resultScore, scannedAt: new Date().toLocaleString() }, ...prev].slice(0, 8));
     } catch (e) { setError(e.message || 'OCR failed. Try a clearer label image.'); }
     finally { setBusy(false); }
   }
 
   function downloadReport() {
-    const report = { productImage: file?.name || null, generatedAt: new Date().toISOString(), ocrConfidence: confidence, score, status, checks, extractedText: ocrText, note: 'Prototype screening report. Verify findings against the current applicable Legal Metrology rules/amendments before enforcement action.' };
+    const report = { productImages: files.map(f => f.name), generatedAt: new Date().toISOString(), ocrConfidence: confidence, score, status, checks, extractedText: ocrText, note: 'Prototype screening report. Verify findings against the current applicable Legal Metrology rules/amendments before enforcement action.' };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `legalmetrix-scanner-report-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
   }
@@ -75,15 +76,15 @@ function App() {
       <section className="hero"><div><p className="eyebrow">LEGAL METROLOGY • FIELD INSPECTION</p><h1>Scan. Validate. Explain.</h1><p>Capture a package label with your phone camera and check mandatory declarations in seconds.</p></div><div className="hero-flow"><span>01 Scan</span><span>02 OCR</span><span>03 Rules</span><span>04 Report</span></div></section>
 
       <section className="grid">
-        <div className="panel upload-panel">
+        <div id="scanner" className="panel upload-panel">
           <div className="panel-head"><div><h2>Product scanner</h2><p>Camera capture is optimized for mobile.</p></div><span className="badge">OCR {confidence || '—'}%</span></div>
-          <input ref={cameraRef} className="hidden-input" type="file" accept="image/*" capture="environment" onChange={e => handleFile(e.target.files[0])} />
-          <input ref={galleryRef} className="hidden-input" type="file" accept="image/*" onChange={e => handleFile(e.target.files[0])} />
-          <div className="scan-actions"><button className="camera-btn" onClick={() => cameraRef.current?.click()}><span>⌾</span><b>Take Photo</b><small>Use camera</small></button><button className="gallery-btn" onClick={() => galleryRef.current?.click()}><span>▧</span><b>Choose Image</b><small>From gallery</small></button></div>
-          <label className="dropzone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}>
-            {preview ? <img src={preview} alt="Uploaded product label" /> : <><div className="upload-icon">↑</div><strong>Drop label image here</strong><span>Desktop upload • JPG / PNG</span></>}
+          <input ref={cameraRef} className="hidden-input" type="file" accept="image/*" capture="environment" multiple onChange={e => handleFiles(e.target.files)} />
+          <input ref={galleryRef} className="hidden-input" type="file" accept="image/*" multiple onChange={e => handleFiles(e.target.files)} />
+          <div className="scan-actions"><button className="camera-btn" onClick={() => cameraRef.current?.click()}><span>⌾</span><b>Add Product Photo</b><small>Capture another side</small></button><button className="gallery-btn" onClick={() => galleryRef.current?.click()}><span>▧</span><b>Add from Gallery</b><small>Select multiple photos</small></button></div>
+          <label className="dropzone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
+            {files.length ? <div className="photo-grid">{files.map((f, i) => <div className="photo-thumb" key={`${f.name}-${i}`}><img src={URL.createObjectURL(f)} alt={`Product photo ${i + 1}`} /><button type="button" onClick={(e) => { e.preventDefault(); removePhoto(i); }}>×</button></div>)}</div> : <><div className="upload-icon">↑</div><strong>Drop one or more label images here</strong><span>For round/cylindrical packs, capture multiple sides</span></>}
           </label>
-          {file && <div className="file-row"><span title={file.name}>{file.name}</span><button className="primary" onClick={scan} disabled={busy}>{busy ? `Scanning ${confidence}%` : 'Run compliance scan'}</button></div>}
+          {files.length > 0 && <div className="file-row"><span>{files.length} photo{files.length > 1 ? 's' : ''} selected</span><button className="primary" onClick={scan} disabled={busy}>{busy ? `Scanning ${confidence}%` : 'Run compliance scan'}</button></div>}
           {error && <div className="error">{error}</div>}
         </div>
 
@@ -94,7 +95,7 @@ function App() {
 
       <section className="panel history"><div className="panel-head"><div><h2>Inspection history</h2><p>Recent local scans.</p></div></div>{history.length === 0 ? <div className="empty">No scans yet. Your first inspection will appear here.</div> : <div className="history-list">{history.map(item => <div className="history-row" key={item.id}><span className="mini-file">IMG</span><div><b>{item.name}</b><small>{item.scannedAt}</small></div><strong>{item.score}%</strong></div>)}</div>}</section>
     </main>
-    <nav className="mobile-nav"><button onClick={() => window.scrollTo({top:0, behavior:'smooth'})}>⌂<span>Scanner</span></button><button onClick={() => document.querySelector('.checklist')?.scrollIntoView({behavior:'smooth'})}>✓<span>Checks</span></button><button onClick={() => document.querySelector('.history')?.scrollIntoView({behavior:'smooth'})}>◷<span>History</span></button></nav>
+    <a className="direct-scan-fab" href="/?scan=1#scanner" aria-label="Open direct scanner">⌾<span>Quick Scan</span></a><nav className="mobile-nav"><button onClick={() => window.scrollTo({top:0, behavior:'smooth'})}>⌂<span>Scanner</span></button><button onClick={() => document.querySelector('.checklist')?.scrollIntoView({behavior:'smooth'})}>✓<span>Checks</span></button><button onClick={() => document.querySelector('.history')?.scrollIntoView({behavior:'smooth'})}>◷<span>History</span></button></nav>
     <footer>LegalMetriX Scanner • SIH 26034 • Prototype for enforcement decision support</footer>
   </div>;
 }
