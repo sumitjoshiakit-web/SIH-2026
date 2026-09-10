@@ -11,7 +11,8 @@ const upload = multer({
 });
 const PORT = process.env.PORT || 5000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -60,7 +61,68 @@ function parseJsonResponse(text) {
   return JSON.parse(match[0]);
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '2.0.0', ai: Boolean(GEMINI_API_KEY), model: GEMINI_MODEL }));
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function isRetryableStatus(status) {
+  return [408, 429, 500, 502, 503, 504].includes(status);
+}
+
+async function callGemini(model, parts) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const body = {
+    contents: [{ role: 'user', parts }],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'object',
+        properties: {
+          productName: { type: 'string' },
+          text: { type: 'string' },
+          confidence: { type: 'integer' },
+          fields: {
+            type: 'object',
+            properties: {
+              manufacturer: { type: 'string' }, origin: { type: 'string' }, commodity: { type: 'string' },
+              quantity: { type: 'string' }, date: { type: 'string' }, mrp: { type: 'string' }, consumerCare: { type: 'string' },
+            },
+          },
+          notes: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['productName', 'text', 'confidence', 'fields', 'notes'],
+      },
+    },
+  };
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok) return { payload, model };
+
+      const message = payload?.error?.message || `Gemini request failed with HTTP ${response.status}.`;
+      lastError = Object.assign(new Error(message), { status: response.status });
+      if (!isRetryableStatus(response.status)) break;
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < 3) await sleep(800 * (2 ** (attempt - 1)));
+  }
+  throw lastError || new Error(`Gemini OCR failed for ${model}.`);
+}
+
+app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '2.1.0', ai: Boolean(GEMINI_API_KEY), model: GEMINI_MODEL }));
 app.get('/api/rules', (_req, res) => res.json({ framework: 'Legal Metrology Packaged Commodities screening', rules: RULES.map(({ pattern, ...rule }) => rule) }));
 
 app.post('/api/inspections', upload.array('images', 8), (req, res) => {
@@ -100,48 +162,33 @@ Confidence must be an integer from 0 to 100 and should reflect legibility of the
       parts.push({ inline_data: { mime_type: file.mimetype, data: file.buffer.toString('base64') } });
     }
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'object',
-            properties: {
-              productName: { type: 'string' },
-              text: { type: 'string' },
-              confidence: { type: 'integer' },
-              fields: {
-                type: 'object',
-                properties: {
-                  manufacturer: { type: 'string' }, origin: { type: 'string' }, commodity: { type: 'string' },
-                  quantity: { type: 'string' }, date: { type: 'string' }, mrp: { type: 'string' }, consumerCare: { type: 'string' },
-                },
-              },
-              notes: { type: 'array', items: { type: 'string' } },
-            },
-            required: ['productName', 'text', 'confidence', 'fields', 'notes'],
-          },
-        },
-      }),
-    });
+    const models = [...new Set([GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS])];
+    let result = null;
+    let lastError = null;
 
-    const payload = await response.json();
-    if (!response.ok) {
-      const message = payload?.error?.message || 'Gemini OCR request failed.';
-      return res.status(502).json({ error: message });
+    for (const model of models) {
+      try {
+        result = await callGemini(model, parts);
+        if (model !== GEMINI_MODEL) console.warn(`Gemini OCR fallback succeeded with ${model}`);
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn(`Gemini OCR failed on ${model}: ${error?.message || error}`);
+      }
     }
 
-    const parsed = parseJsonResponse(extractGeminiText(payload));
+    if (!result) {
+      const status = lastError?.status || 503;
+      return res.status(status >= 400 && status < 600 ? 502 : 503).json({ error: lastError?.message || 'All Gemini OCR models failed after retries.' });
+    }
+
+    const parsed = parseJsonResponse(extractGeminiText(result.payload));
     const text = String(parsed.text || '').trim();
     if (!text) return res.status(502).json({ error: 'AI could not read usable text from the supplied images.' });
 
     res.json({
       provider: 'Google Gemini Vision',
-      model: GEMINI_MODEL,
+      model: result.model,
       productName: parsed.productName || 'Unknown product',
       extractedText: text,
       confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 0)),
@@ -162,9 +209,24 @@ app.post('/api/inspections/analyze', (req, res) => {
   res.status(200).json({ inspectionId: crypto.randomUUID(), productName, ocrConfidence, generatedAt: new Date().toISOString(), ...evaluation, disclaimer: 'Screening aid only. Findings must be verified against the current applicable Legal Metrology rules and amendments before enforcement action.' });
 });
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>\"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', "'":'&#39;' }[c]));
+}
+
 app.post('/api/reports', (req, res) => {
-  const { product, checks = [], score = 0, extractedText = '', status = 'NEEDS_REVIEW' } = req.body;
-  res.json({ reportId: crypto.randomUUID(), generatedAt: new Date().toISOString(), product: product || 'Unknown product', score, status, checks, extractedText });
+  const { product, checks = [], score = 0, extractedText = '', status = 'NEEDS_REVIEW', ocrProvider = '', confidence = 0 } = req.body || {};
+  const reportId = crypto.randomUUID();
+  const generatedAt = new Date().toISOString();
+
+  if (req.body?.format === 'html') {
+    const rows = (Array.isArray(checks) ? checks : []).map(check => `<tr><td>${escapeHtml(check.title || check.label)}</td><td>${escapeHtml(check.status || 'REVIEW')}</td><td>${escapeHtml(check.evidence || 'Not confidently detected')}</td></tr>`).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LegalMetriX Inspection Report</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px 20px;color:#172033}h1{margin-bottom:4px}.meta{line-height:1.7}.score{font-size:42px;font-weight:700;margin:20px 0 4px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d9dee8;padding:10px;text-align:left;vertical-align:top}th{background:#f5f7fb}pre{white-space:pre-wrap;background:#f5f7fb;padding:16px;border-radius:10px}.notice{margin-top:24px;font-size:12px;color:#5c6575}</style></head><body><h1>LegalMetriX Scanner</h1><p>Inspection screening report</p><p class="score">${escapeHtml(score)}/100</p><div class="meta"><b>Product:</b> ${escapeHtml(product || 'Unknown product')}<br><b>Status:</b> ${escapeHtml(status)}<br><b>OCR:</b> ${escapeHtml(ocrProvider || 'OCR')} (${escapeHtml(confidence)}%)<br><b>Report ID:</b> ${escapeHtml(reportId)}<br><b>Generated:</b> ${escapeHtml(new Date(generatedAt).toLocaleString())}</div><h2>Declaration checks</h2><table><thead><tr><th>Requirement</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table><h2>Extracted label text</h2><pre>${escapeHtml(extractedText)}</pre><p class="notice">Screening aid only. Findings must be verified against the current applicable Legal Metrology rules and amendments before enforcement action.</p></body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="legalmetrix-report-${reportId}.html"`);
+    return res.status(200).send(html);
+  }
+
+  return res.json({ reportId, generatedAt, product: product || 'Unknown product', score, status, checks, extractedText });
 });
 
 app.listen(PORT, () => console.log(`LegalMetriX Scanner API running on port ${PORT}`));
