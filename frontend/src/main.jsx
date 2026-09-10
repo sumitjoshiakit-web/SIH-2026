@@ -1,29 +1,42 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import Tesseract from 'tesseract.js';
 import './styles.css';
 
-const REQUIRED_FIELDS = [
-  ['manufacturer', 'Manufacturer / packer / importer details'],
-  ['origin', 'Country of origin (where applicable)'],
-  ['commodity', 'Common / generic commodity name'],
-  ['quantity', 'Net quantity'],
-  ['date', 'Month / year of manufacture or packing'],
-  ['mrp', 'MRP inclusive of all taxes'],
-  ['consumerCare', 'Consumer care details'],
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
+const RULE_TITLES = [
+  ['LM-01', 'manufacturerIdentity', 'Manufacturer / packer / importer name'],
+  ['LM-02', 'completeAddress', 'Complete manufacturer / packer / importer address'],
+  ['LM-03', 'actualBusinessName', 'Actual corporate / business name identifiable'],
+  ['LM-04', 'origin', 'Country of origin (where applicable)'],
+  ['LM-05', 'commodity', 'Common / generic name of commodity'],
+  ['LM-06', 'multiProductDetails', 'Name + number/quantity of each product where package has multiple products'],
+  ['LM-07', 'quantity', 'Net quantity in standard unit / number'],
+  ['LM-08', 'manufactureDate', 'Month and year of manufacture / packing / applicable date declaration'],
+  ['LM-09', 'bestBefore', 'Best before / use by date where applicable'],
+  ['LM-10', 'mrp', 'Maximum Retail Price (MRP) / retail sale price'],
+  ['LM-11', 'mrpInclusiveTaxes', 'MRP stated inclusive of all taxes'],
+  ['LM-12', 'unitSalePrice', 'Unit sale price in prescribed unit where applicable'],
+  ['LM-13', 'consumerCare', 'Consumer care contact: name/address/phone/email'],
+  ['LM-14', 'dimensions', 'Dimensions where dimensions are relevant'],
+  ['LM-15', 'quantityUnits', 'Quantity uses an appropriate standard unit / number'],
+  ['LM-16', 'quantityMisleadingWords', 'No misleading quantity wording detected'],
+  ['LM-17', 'language', 'Mandatory declarations in Hindi (Devanagari) or English'],
+  ['LM-18', 'visualManner', 'Legible, prominent and prescribed presentation'],
+  ['LM-19', 'principalDisplayPanel', 'Required declarations appear on principal display panel'],
+  ['LM-20', 'contrast', 'MRP and net quantity numerals contrast with background'],
+  ['LM-21', 'quantitySpacing', 'Required clear space around quantity declaration'],
+  ['LM-22', 'outerWrapper', 'Outer wrapper/container carries required declarations where applicable'],
 ];
 
-const FIELD_PATTERNS = {
-  manufacturer: /(manufactur|manufactured|marketed|packed\s*by|packer|importer|निर्माता|निर्मित|पैक|आयातक)/i,
-  origin: /(country\s+of\s+origin|made\s+in|product\s+of|origin\s*[:\-]|निर्मित\s*स्थान|उत्पत्ति|देश)/i,
-  commodity: /(product|commodity|contents|ingredients|material|powder|spices?|उत्पाद|सामग्री|वस्तु|मसाला)/i,
-  quantity: /(net\s*(qty|quantity|weight|wt|vol)|net\s*wt\.?|\b\d+(?:\.\d+)?\s?(?:kg|g|mg|l|ml)\b|शुद्ध\s*(मात्रा|वजन)|मात्रा)/i,
-  date: /(mfg|manufactur(ed|e)?|packed|pkd|use\s*by|best\s*before|\bdate\b|\b\d{1,2}[/-]\d{4}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)['’\s-]*\d{4}\b|निर्माण|पैकिंग|तिथि|उपयोग)/i,
-  mrp: /(m\.?r\.?p|maximum\s+retail\s+price|retail\s+sale\s+price|अधिकतम\s*खुदरा\s*मूल्य|खुदरा\s*मूल्य)/i,
-  consumerCare: /(consumer\s+care|customer\s+care|helpline|toll[- ]free|contact\s+us|e[- ]?mail|email|phone|mobile|उपभोक्ता\s*देखभाल|हेल्पलाइन|संपर्क)/i,
-};
-
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const INITIAL_CHECKS = RULE_TITLES.map(([ruleId, key, title]) => ({
+  ruleId,
+  key,
+  title,
+  status: 'REVIEW',
+  evidence: null,
+  message: 'Waiting for AI scan.',
+}));
 
 function Icon({ name, size = 22 }) {
   const paths = {
@@ -33,7 +46,6 @@ function Icon({ name, size = 22 }) {
     home: <><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-6h6v6"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
-    scan: <><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 12h8"/></>,
     x: <><path d="m6 6 12 12M18 6 6 18"/></>,
     trash: <><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13M9 7V4h6v3"/></>,
   };
@@ -42,7 +54,7 @@ function Icon({ name, size = 22 }) {
 
 function PhotoPreview({ item, index, onRemove }) {
   return <div className="photo-thumb">
-    <img src={item.url} alt={`Product photo ${index + 1}`} draggable="false" onClick={e => e.stopPropagation()} />
+    <img src={item.url} alt={`Product photo ${index + 1}`} draggable="false" />
     <button type="button" aria-label={`Remove photo ${index + 1}`} onClick={e => { e.preventDefault(); e.stopPropagation(); onRemove(index); }}><Icon name="x" size={16} /></button>
   </div>;
 }
@@ -64,10 +76,10 @@ function App() {
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
 
-  useEffect(() => () => files.forEach(item => URL.revokeObjectURL(item.url)), []);
   useEffect(() => { localStorage.setItem('legalmetrix-history', JSON.stringify(history)); }, [history]);
   useEffect(() => {
     const sections = ['scanner', 'checks', 'history'].map(id => document.getElementById(id)).filter(Boolean);
+    if (!('IntersectionObserver' in window)) return undefined;
     const observer = new IntersectionObserver(entries => {
       const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
       if (visible) setActiveNav(visible.target.id);
@@ -76,30 +88,38 @@ function App() {
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (!error) return;
+    if (!error) return undefined;
     const timer = setTimeout(() => setError(''), 8000);
     return () => clearTimeout(timer);
   }, [error]);
+  useEffect(() => () => files.forEach(item => URL.revokeObjectURL(item.url)), [files]);
 
-  const checks = useMemo(() => REQUIRED_FIELDS.map(([key, label]) => ({ key, label, pass: !!ocrText && FIELD_PATTERNS[key].test(ocrText) })), [ocrText]);
-  const fallbackScore = ocrText ? Math.round((checks.filter(c => c.pass).length / checks.length) * 100) : 0;
-  const fallbackStatus = !ocrText ? 'Ready to scan' : fallbackScore >= 85 ? 'Likely compliant' : fallbackScore >= 60 ? 'Needs review' : 'Potential non-compliance';
-  const displayScore = scanResult?.score ?? fallbackScore;
-  const displayStatus = scanResult?.status ? scanResult.status.replaceAll('_', ' ').replace(/\b\w/g, x => x.toUpperCase()) : fallbackStatus;
-  const displayChecks = scanResult?.checks || checks.map(c => ({ key: c.key, title: c.label, status: c.pass ? 'PASS' : 'REVIEW', evidence: c.pass ? 'Detected in OCR' : null }));
+  const displayChecks = scanResult?.checks?.length ? scanResult.checks : INITIAL_CHECKS;
   const visibleChecks = showAllRules ? displayChecks : displayChecks.slice(0, 4);
+  const displayScore = scanResult?.score ?? 0;
+  const displayStatus = scanResult?.status
+    ? scanResult.status.replaceAll('_', ' ').replace(/\b\w/g, x => x.toUpperCase())
+    : 'Ready to scan';
   const reviewCount = displayChecks.filter(c => c.status === 'REVIEW').length;
-  const passCount = displayChecks.filter(c => c.status === 'PASS' || c.pass).length;
+  const passCount = displayChecks.filter(c => c.status === 'PASS').length;
+
+  function resetResults() {
+    setOcrText('');
+    setConfidence(0);
+    setOcrProvider('');
+    setScanResult(null);
+    setShowAllRules(false);
+  }
 
   function addFiles(selectedFiles) {
-    const incoming = Array.from(selectedFiles || []).filter(f => f.type.startsWith('image/'));
+    const incoming = Array.from(selectedFiles || []).filter(file => file.type.startsWith('image/'));
     if (!incoming.length) { setError('Please select one or more JPG/PNG image files.'); return; }
     const remaining = Math.max(0, 8 - files.length);
     if (!remaining) { setError('Maximum 8 product photos can be scanned at once.'); return; }
     setError('');
     const accepted = incoming.slice(0, remaining).map(file => ({ file, url: URL.createObjectURL(file) }));
     setFiles(prev => [...prev, ...accepted]);
-    setOcrText(''); setConfidence(0); setOcrProvider(''); setScanResult(null); setShowAllRules(false);
+    resetResults();
   }
 
   function removePhoto(index) {
@@ -108,62 +128,58 @@ function App() {
       if (removed) URL.revokeObjectURL(removed.url);
       return prev.filter((_, i) => i !== index);
     });
-    setOcrText(''); setConfidence(0); setScanResult(null); setShowAllRules(false);
-  }
-
-  async function tesseractFallback() {
-    const results = [];
-    let language = 'eng+hin';
-    for (const item of files) {
-      try {
-        const result = await Tesseract.recognize(item.file, language, { logger: message => { if (message.status === 'recognizing text') setConfidence(Math.round((message.progress || 0) * 100)); } });
-        results.push(result);
-      } catch (error) {
-        console.warn('Hindi+English Tesseract failed, retrying English:', error);
-        const result = await Tesseract.recognize(item.file, 'eng', { logger: message => message.status === 'recognizing text' && setConfidence(Math.round((message.progress || 0) * 100)) });
-        results.push(result); language = 'eng';
-      }
-    }
-    const text = results.map((r, i) => `[Photo ${i + 1}]\n${String(r.data.text || '').trim()}`).filter(section => section.replace(/\[Photo \d+\]\s*/, '').trim()).join('\n\n');
-    const avgConfidence = Math.round(results.reduce((sum, r) => sum + (Number(r.data.confidence) || 0), 0) / Math.max(results.length, 1));
-    return { extractedText: text, confidence: avgConfidence, productName: files[0]?.file.name || 'Unknown product', provider: `Tesseract.js fallback • ${language === 'eng+hin' ? 'Hindi + English' : 'English'}` };
+    resetResults();
   }
 
   async function scan() {
     if (!files.length || busy) return;
-    setBusy(true); setError(''); setScanResult(null); setShowAllRules(false); setConfidence(0);
+    if (!API_BASE) {
+      setError('AI OCR backend is not configured. Set VITE_API_URL to the deployed backend URL.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setScanResult(null);
+    setShowAllRules(false);
+    setConfidence(0);
+
     try {
-      let ocr;
-      if (API_BASE) {
-        const formData = new FormData();
-        files.forEach(item => formData.append('images', item.file, item.file.name));
-        try {
-          const response = await fetch(`${API_BASE}/api/ocr`, { method: 'POST', body: formData });
-          if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'AI OCR request failed'); }
-          const data = await response.json();
-          ocr = { extractedText: data.extractedText, confidence: data.confidence, productName: data.productName, provider: `${data.provider || 'AI Vision'} • ${data.model || ''}`.trim() };
-        } catch (aiError) {
-          setError(`AI OCR unavailable, using local Hindi + English OCR fallback: ${aiError.message}`);
-          ocr = await tesseractFallback();
-        }
-      } else ocr = await tesseractFallback();
+      const formData = new FormData();
+      files.forEach(item => formData.append('images', item.file, item.file.name));
 
-      const text = String(ocr.extractedText || '').trim();
-      if (!text) throw new Error('No readable text was found. Capture clearer label photos and try again.');
-      setOcrText(text); setConfidence(Math.round(Number(ocr.confidence) || 0)); setOcrProvider(ocr.provider || 'OCR');
+      const ocrResponse = await fetch(`${API_BASE}/api/ocr`, { method: 'POST', body: formData });
+      const ocrBody = await ocrResponse.json().catch(() => ({}));
+      if (!ocrResponse.ok) throw new Error(ocrBody.error || 'AI OCR request failed.');
 
-      let backendResult = null;
-      if (API_BASE) {
-        const response = await fetch(`${API_BASE}/api/inspections/analyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractedText: text, productName: ocr.productName, ocrConfidence: ocr.confidence }) });
-        if (response.ok) backendResult = await response.json();
-      }
+      const text = String(ocrBody.extractedText || '').trim();
+      if (!text) throw new Error('AI could not read the label. Capture clearer product photos and try again.');
 
-      const resultScore = Math.round((REQUIRED_FIELDS.filter(([key]) => FIELD_PATTERNS[key].test(text)).length / REQUIRED_FIELDS.length) * 100);
-      const result = backendResult || { score: resultScore, status: resultScore >= 85 ? 'LIKELY_COMPLIANT' : resultScore >= 60 ? 'NEEDS_REVIEW' : 'POTENTIAL_NON_COMPLIANCE', checks: REQUIRED_FIELDS.map(([key, label]) => ({ key, title: label, status: FIELD_PATTERNS[key].test(text) ? 'PASS' : 'REVIEW', evidence: FIELD_PATTERNS[key].test(text) ? 'Detected in OCR' : null })) };
-      setScanResult(result);
-      setHistory(prev => [{ id: crypto.randomUUID(), name: `${files.length} photo${files.length > 1 ? 's' : ''} • ${ocr.productName || files[0].file.name}`, score: result.score, scannedAt: new Date().toLocaleString() }, ...prev].slice(0, 12));
-    } catch (e) { setError(e.message || 'OCR failed. Try clearer label images.'); }
-    finally { setBusy(false); }
+      const nextConfidence = Math.round(Number(ocrBody.confidence) || 0);
+      setOcrText(text);
+      setConfidence(nextConfidence);
+      setOcrProvider(`${ocrBody.provider || 'AI Vision'}${ocrBody.model ? ` • ${ocrBody.model}` : ''}`);
+
+      const analyzeResponse = await fetch(`${API_BASE}/api/inspections/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extractedText: text, productName: ocrBody.productName, ocrConfidence: nextConfidence }),
+      });
+      const resultBody = await analyzeResponse.json().catch(() => ({}));
+      if (!analyzeResponse.ok) throw new Error(resultBody.error || 'Compliance analysis failed.');
+
+      setScanResult(resultBody);
+      setHistory(prev => [{
+        id: crypto.randomUUID(),
+        name: `${files.length} photo${files.length > 1 ? 's' : ''} • ${ocrBody.productName || files[0].file.name}`,
+        score: resultBody.score,
+        scannedAt: new Date().toLocaleString(),
+      }, ...prev].slice(0, 12));
+    } catch (e) {
+      setError(e.message || 'AI OCR failed. Try clearer label images.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   function clearHistory() {
@@ -172,23 +188,30 @@ function App() {
   }
 
   function downloadBlob(content, type, filename) {
-    const blob = new Blob([content], { type }); const url = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 500);
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 500);
   }
 
   async function downloadReport() {
-    if (!ocrText || !scanResult) return;
-    const payload = { format: 'html', product: scanResult.productName || files[0]?.file.name || 'Unknown product', checks: displayChecks, score: displayScore, extractedText: ocrText, status: displayStatus, ocrProvider, confidence };
-    if (API_BASE) {
-      try {
-        const response = await fetch(`${API_BASE}/api/reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (response.ok) { const blob = await response.blob(); downloadBlob(blob, 'text/html;charset=utf-8', `legalmetrix-report-${Date.now()}.html`); return; }
-      } catch (error) { console.warn('Server report failed, using local report:', error); }
+    if (!ocrText || !scanResult || !API_BASE) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format: 'html', product: scanResult.productName || files[0]?.file.name || 'Unknown product', checks: displayChecks, score: displayScore, extractedText: ocrText, status: displayStatus, ocrProvider, confidence }),
+      });
+      if (!response.ok) throw new Error('Report generation failed.');
+      downloadBlob(await response.blob(), 'text/html;charset=utf-8', `legalmetrix-report-${Date.now()}.html`);
+    } catch (e) {
+      setError(e.message || 'Could not export report.');
     }
-    const safe = value => String(value ?? '').replace(/[&<>\"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', "'":'&#39;' }[c]));
-    const rows = displayChecks.map(c => `<tr><td>${safe(c.title || c.label)}</td><td>${safe(c.status)}</td><td>${safe(c.evidence || 'Not confidently detected')}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>LegalMetriX Inspection Report</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#172033}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:10px;text-align:left}pre{white-space:pre-wrap;background:#f6f8fb;padding:16px;border-radius:8px}</style></head><body><h1>LegalMetriX Inspection Report</h1><p><b>Status:</b> ${safe(displayStatus)} &nbsp; <b>Score:</b> ${safe(displayScore)}/100</p><p><b>OCR:</b> ${safe(ocrProvider)} (${safe(confidence)}%)</p><table><thead><tr><th>Check</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table><h2>Extracted label text</h2><pre>${safe(ocrText)}</pre></body></html>`;
-    downloadBlob(html, 'text/html;charset=utf-8', `legalmetrix-report-${Date.now()}.html`);
   }
 
   function scrollTo(id) { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -196,25 +219,25 @@ function App() {
   return <div className="app-shell">
     <header className="topbar"><a className="brand" href="#scanner" onClick={e => { e.preventDefault(); scrollTo('scanner'); }}><span className="brand-mark">LM</span><span>LegalMetriX</span></a><div className="top-meta"><span>SIH 26034</span><span>Legal Metrology screening</span></div></header>
     <main className="page">
-      <section className="hero"><div><p className="eyebrow">PACKAGED COMMODITY INSPECTION</p><h1>Scan. Check. <span>Verify.</span></h1><p className="hero-copy">Upload clear label photos to screen mandatory declarations under the Legal Metrology (Packaged Commodities) Rules.</p></div><div className="hero-note"><b>Prototype decision support</b><span>Photo + OCR screening is not a substitute for physical inspection.</span></div></section>
+      <section className="hero"><div><p className="eyebrow">PACKAGED COMMODITY INSPECTION</p><h1>Scan. Check. <span>Verify.</span></h1><p className="hero-copy">Upload clear label photos to screen mandatory declarations under the Legal Metrology (Packaged Commodities) Rules.</p></div><div className="hero-note"><b>Prototype decision support</b><span>Photo + AI OCR screening is not a substitute for physical inspection.</span></div></section>
 
       <section className="grid">
         <div id="scanner" className="panel upload-panel">
-          <div className="panel-head"><div><h2>Product scanner</h2><p>Start with a clear photo of the label.</p></div><span className="badge">{ocrProvider ? `${ocrProvider.split(' • ')[0]} ${confidence}%` : `OCR ${confidence || '—'}%`}</span></div>
+          <div className="panel-head"><div><h2>Product scanner</h2><p>Start with a clear photo of the label.</p></div><span className="badge">{ocrProvider ? `${ocrProvider.split(' • ')[0]} ${confidence}%` : 'AI OCR —'}</span></div>
           <input ref={cameraRef} className="hidden-input" type="file" accept="image/*" capture="environment" multiple onChange={e => addFiles(e.target.files)} />
           <input ref={galleryRef} className="hidden-input" type="file" accept="image/*" multiple onChange={e => addFiles(e.target.files)} />
           <div className="scan-actions"><button className="camera-btn" type="button" onClick={() => cameraRef.current?.click()}><Icon name="camera" size={24} /><span><b>Add Product Photo</b><small>Capture another side</small></span></button><button className="gallery-btn" type="button" onClick={() => galleryRef.current?.click()}><Icon name="gallery" size={24} /><span><b>Add from Gallery</b><small>Select multiple photos</small></span></button></div>
           <div className={`dropzone ${dragActive ? 'drag-active' : ''}`} onDragEnter={e => { e.preventDefault(); setDragActive(true); }} onDragOver={e => e.preventDefault()} onDragLeave={e => { if (e.currentTarget === e.target) setDragActive(false); }} onDrop={e => { e.preventDefault(); setDragActive(false); addFiles(e.dataTransfer.files); }}>
             {files.length ? <div className="photo-grid">{files.map((item, i) => <PhotoPreview key={`${item.file.name}-${item.file.lastModified}-${i}`} item={item} index={i} onRemove={removePhoto} />)}</div> : <><div className="upload-icon"><Icon name="upload" size={22} /></div><strong>{dragActive ? 'Drop images to add them' : 'Drop one or more label images here'}</strong><span>For round/cylindrical packs, capture multiple sides</span></>}
           </div>
-          {files.length > 0 && <div className="file-row"><span>{files.length} photo{files.length > 1 ? 's' : ''} selected</span><button className="primary" type="button" onClick={scan} disabled={busy}>{busy ? `Scanning ${confidence}%` : 'Run compliance scan'}</button></div>}
-          {busy && <div className="scan-progress" role="status" aria-live="polite"><div className="progress-top"><span>Analyzing label and checking declarations</span><b>{confidence}%</b></div><div className="progress-track"><div className="progress-fill" style={{ width: `${Math.max(4, confidence)}%` }} /></div><small>AI OCR → Legal Metrology rules → screening result</small></div>}
+          {files.length > 0 && <div className="file-row"><span>{files.length} photo{files.length > 1 ? 's' : ''} selected</span><button className="primary" type="button" onClick={scan} disabled={busy}>{busy ? `Scanning ${confidence}%` : 'Run AI compliance scan'}</button></div>}
+          {busy && <div className="scan-progress" role="status" aria-live="polite"><div className="progress-top"><span>AI OCR → Legal Metrology analysis</span><b>{confidence}%</b></div><div className="progress-track"><div className="progress-fill" style={{ width: `${Math.max(4, confidence)}%` }} /></div><small>Using Gemini Vision AI only. No local OCR fallback.</small></div>}
           {error && <div className="error" role="alert"><span>{error}</span><button type="button" aria-label="Dismiss error" onClick={() => setError('')}><Icon name="x" size={17} /></button></div>}
         </div>
-        <div className="panel score-panel"><div className="score-ring" style={{ '--score': `${displayScore * 3.6}deg` }}><div><b>{displayScore}</b><span>/ 100</span></div></div><p className="eyebrow">COMPLIANCE SCREEN</p><h2>{displayStatus}</h2><p>{ocrText ? `${passCount} of ${displayChecks.length} declaration checks detected${reviewCount ? ` • ${reviewCount} need review` : ''}.` : 'Scan a product to calculate the screening score.'}</p><button className="secondary" type="button" disabled={!ocrText} onClick={downloadReport}>Export inspection report</button></div>
+        <div className="panel score-panel"><div className="score-ring" style={{ '--score': `${displayScore * 3.6}deg` }}><div><b>{displayScore}</b><span>/ 100</span></div></div><p className="eyebrow">COMPLIANCE SCREEN</p><h2>{displayStatus}</h2><p>{scanResult ? `${passCount} of ${displayChecks.length} declaration checks passed${reviewCount ? ` • ${reviewCount} need review` : ''}.` : 'Scan a product to calculate the AI screening score.'}</p><button className="secondary" type="button" disabled={!ocrText} onClick={downloadReport}>Export inspection report</button></div>
       </section>
 
-      <section id="checks" className="panel checklist"><div className="panel-head"><div><h2>Mandatory declaration checks</h2><p>Start with the 4 most important checks. Expand when you need the full rule set.</p></div><span className={`status ${displayScore >= 85 ? 'good' : displayScore >= 60 ? 'warn' : 'bad'}`}>{displayStatus}</span></div><div className="rules-summary"><span><b>{displayChecks.length}</b> rules mapped</span><span className="summary-dot">•</span><span>4 essential checks first</span></div><div className="check-grid">{visibleChecks.map(c => { const pass = c.status === 'PASS' || c.pass; const review = c.status === 'REVIEW' || c.status === 'review'; return <div className={`check ${pass ? 'check-pass' : review ? 'check-review' : 'check-fail'}`} key={c.key || c.ruleId}><span className={`dot ${pass ? 'pass' : review ? 'review' : 'fail'}`}>{pass ? '✓' : review ? 'i' : '!'}</span><div><b>{c.title || c.label}</b><small>{ocrText ? (pass ? (c.evidence ? `Detected: ${c.evidence}` : 'Detected in label text') : review ? 'Not confidently detected — verify label' : (c.evidence || 'Potential issue detected')) : 'Waiting for scan'}</small></div></div>; })}</div>{displayChecks.length > 4 && <button type="button" className="view-all-rules" onClick={() => setShowAllRules(value => !value)}>{showAllRules ? 'Show less ↑' : `View all ${displayChecks.length} rules ›`}</button>}{ocrText && <div className="evidence"><div className="panel-head"><div><h3>Extracted label text</h3><p>{ocrProvider || 'OCR'} • Review text before relying on a finding.</p></div></div><pre>{ocrText}</pre></div>}</section>
+      <section id="checks" className="panel checklist"><div className="panel-head"><div><h2>Mandatory declaration checks</h2><p>All 22 mapped rules are visible before scanning. After scanning, AI fills their status.</p></div><span className={`status ${displayScore >= 85 ? 'good' : displayScore >= 60 ? 'warn' : 'bad'}`}>{displayStatus}</span></div><div className="rules-summary"><span><b>{displayChecks.length}</b> rules mapped</span><span className="summary-dot">•</span><span>4 essential checks first</span></div><div className="check-grid">{visibleChecks.map(c => { const pass = c.status === 'PASS'; const review = c.status === 'REVIEW' || c.status === 'review'; return <div className={`check ${pass ? 'check-pass' : review ? 'check-review' : 'check-fail'}`} key={c.key || c.ruleId}><span className={`dot ${pass ? 'pass' : review ? 'review' : 'fail'}`}>{pass ? '✓' : review ? 'i' : '!'}</span><div><b>{c.title}</b><small>{scanResult ? (pass ? (c.evidence ? `Detected: ${c.evidence}` : 'Detected in AI OCR') : review ? (c.message || 'Not confidently detected — verify label') : (c.evidence || 'Potential issue detected')) : 'Waiting for AI scan'}</small></div></div>; })}</div>{displayChecks.length > 4 && <button type="button" className="view-all-rules" onClick={() => setShowAllRules(value => !value)}>{showAllRules ? 'Show less ↑' : `View all ${displayChecks.length} rules ›`}</button>}{ocrText && <div className="evidence"><div className="panel-head"><div><h3>Extracted label text</h3><p>{ocrProvider} • Review AI-extracted text before relying on a finding.</p></div></div><pre>{ocrText}</pre></div>}</section>
 
       <section id="history" className="panel history"><div className="panel-head"><div><h2>Inspection history</h2><p>Recent scans stored on this device.</p></div>{history.length > 0 && <button className="clear-history" type="button" onClick={clearHistory}><Icon name="trash" size={15} /> Clear history</button>}</div>{history.length === 0 ? <div className="empty">No scans yet. Your first inspection will appear here.</div> : <div className="history-list">{history.map(item => <div className="history-row" key={item.id}><span className="mini-file">IMG</span><div><b>{item.name}</b><small>{item.scannedAt}</small></div><strong>{item.score}%</strong></div>)}</div>}</section>
     </main>
