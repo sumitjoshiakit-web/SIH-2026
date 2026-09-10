@@ -14,13 +14,13 @@ const REQUIRED_FIELDS = [
 ];
 
 const FIELD_PATTERNS = {
-  manufacturer: /(manufactur|manufactured|marketed|packed\s*by|packer|importer)/i,
-  origin: /(country\s+of\s+origin|made\s+in|product\s+of|origin\s*[:\-])/i,
-  commodity: /(product|commodity|contents|ingredients|material|powder|spices?)/i,
-  quantity: /(net\s*(qty|quantity|weight|wt|vol)|net\s*wt\.?|\b\d+(?:\.\d+)?\s?(?:kg|g|mg|l|ml)\b)/i,
-  date: /(mfg|manufactur(ed|e)?|packed|pkd|use\s*by|best\s*before|\bdate\b|\b\d{1,2}[/-]\d{4}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)['’\s-]*\d{4}\b)/i,
-  mrp: /(m\.??r\.??p|maximum\s+retail\s+price|retail\s+sale\s+price)/i,
-  consumerCare: /(consumer\s+care|customer\s+care|helpline|toll[- ]free|contact\s+us|e[- ]?mail|email|phone|mobile)/i,
+  manufacturer: /(manufactur|manufactured|marketed|packed\s*by|packer|importer|निर्माता|निर्मित|पैक|आयातक)/i,
+  origin: /(country\s+of\s+origin|made\s+in|product\s+of|origin\s*[:\-]|निर्मित\s*स्थान|उत्पत्ति|देश)/i,
+  commodity: /(product|commodity|contents|ingredients|material|powder|spices?|उत्पाद|सामग्री|वस्तु|मसाला)/i,
+  quantity: /(net\s*(qty|quantity|weight|wt|vol)|net\s*wt\.?|\b\d+(?:\.\d+)?\s?(?:kg|g|mg|l|ml)\b|शुद्ध\s*(मात्रा|वजन)|मात्रा)/i,
+  date: /(mfg|manufactur(ed|e)?|packed|pkd|use\s*by|best\s*before|\bdate\b|\b\d{1,2}[/-]\d{4}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)['’\s-]*\d{4}\b|निर्माण|पैकिंग|तिथि|उपयोग)/i,
+  mrp: /(m\.?r\.?p|maximum\s+retail\s+price|retail\s+sale\s+price|अधिकतम\s*खुदरा\s*मूल्य|खुदरा\s*मूल्य)/i,
+  consumerCare: /(consumer\s+care|customer\s+care|helpline|toll[- ]free|contact\s+us|e[- ]?mail|email|phone|mobile|उपभोक्ता\s*देखभाल|हेल्पलाइन|संपर्क)/i,
 };
 
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
@@ -80,15 +80,27 @@ function App() {
 
   async function tesseractFallback() {
     const results = [];
+    let language = 'eng+hin';
     for (const item of files) {
-      const result = await Tesseract.recognize(item.file, 'eng', {
-        logger: message => message.status === 'recognizing text' && setConfidence(Math.round((message.progress || 0) * 100)),
-      });
-      results.push(result);
+      try {
+        const result = await Tesseract.recognize(item.file, language, {
+          logger: message => {
+            if (message.status === 'recognizing text') setConfidence(Math.round((message.progress || 0) * 100));
+          },
+        });
+        results.push(result);
+      } catch (error) {
+        console.warn('Hindi+English Tesseract failed, retrying English:', error);
+        const result = await Tesseract.recognize(item.file, 'eng', {
+          logger: message => message.status === 'recognizing text' && setConfidence(Math.round((message.progress || 0) * 100)),
+        });
+        results.push(result);
+        language = 'eng';
+      }
     }
-    const text = results.map((r, i) => `[Photo ${i + 1}]\n${r.data.text.trim()}`).filter(Boolean).join('\n\n');
-    const avgConfidence = Math.round(results.reduce((sum, r) => sum + (r.data.confidence || 0), 0) / Math.max(results.length, 1));
-    return { extractedText: text, confidence: avgConfidence, productName: files[0]?.file.name || 'Unknown product', provider: 'Tesseract.js fallback' };
+    const text = results.map((r, i) => `[Photo ${i + 1}]\n${String(r.data.text || '').trim()}`).filter(section => section.replace(/\[Photo \d+\]\s*/, '').trim()).join('\n\n');
+    const avgConfidence = Math.round(results.reduce((sum, r) => sum + (Number(r.data.confidence) || 0), 0) / Math.max(results.length, 1));
+    return { extractedText: text, confidence: avgConfidence, productName: files[0]?.file.name || 'Unknown product', provider: `Tesseract.js fallback • ${language === 'eng+hin' ? 'Hindi + English' : 'English'}` };
   }
 
   async function scan() {
@@ -108,7 +120,7 @@ function App() {
           const data = await response.json();
           ocr = { extractedText: data.extractedText, confidence: data.confidence, productName: data.productName, provider: `${data.provider || 'AI Vision'} • ${data.model || ''}`.trim() };
         } catch (aiError) {
-          setError(`AI OCR unavailable, using local OCR fallback: ${aiError.message}`);
+          setError(`AI OCR unavailable, using local Hindi + English OCR fallback: ${aiError.message}`);
           ocr = await tesseractFallback();
         }
       } else {
@@ -142,15 +154,29 @@ function App() {
 
   function downloadBlob(content, type, filename) {
     const blob = new Blob([content], { type }); const url = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 300);
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 500);
   }
 
-  function downloadReport() {
-    if (!ocrText) return;
-    const safe = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  async function downloadReport() {
+    if (!ocrText || !scanResult) return;
+    const payload = {
+      format: 'html', product: scanResult.productName || files[0]?.file.name || 'Unknown product', checks: displayChecks,
+      score: displayScore, extractedText: ocrText, status: displayStatus, ocrProvider, confidence,
+    };
+    if (API_BASE) {
+      try {
+        const response = await fetch(`${API_BASE}/api/reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (response.ok) {
+          const blob = await response.blob();
+          downloadBlob(blob, 'text/html;charset=utf-8', `legalmetrix-report-${Date.now()}.html`);
+          return;
+        }
+      } catch (error) { console.warn('Server report failed, using local report:', error); }
+    }
+    const safe = value => String(value ?? '').replace(/[&<>\"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', "'":'&#39;' }[c]));
     const rows = displayChecks.map(c => `<tr><td>${safe(c.title || c.label)}</td><td>${safe(c.status)}</td><td>${safe(c.evidence || 'Not confidently detected')}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>LegalMetriX Scanner Report</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#172033}h1{margin-bottom:4px}table{width:100%;border-collapse:collapse;margin-top:24px}td,th{border:1px solid #d9dee8;padding:10px;text-align:left}pre{white-space:pre-wrap;background:#f5f7fb;padding:16px;border-radius:10px}.score{font-size:36px;font-weight:700}</style></head><body><h1>LegalMetriX Scanner</h1><p>Inspection screening report</p><p class="score">${safe(displayScore)}/100</p><p><b>Status:</b> ${safe(displayStatus)}<br><b>OCR:</b> ${safe(ocrProvider)} (${safe(confidence)}%)<br><b>Generated:</b> ${safe(new Date().toLocaleString())}</p><h2>Declaration checks</h2><table><thead><tr><th>Requirement</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table><h2>Extracted text</h2><pre>${safe(ocrText)}</pre><p><small>Screening aid only. Findings must be verified against the current applicable Legal Metrology rules and amendments before enforcement action.</small></p></body></html>`;
-    downloadBlob(html, 'text/html', `legalmetrix-scanner-report-${Date.now()}.html`);
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LegalMetriX Scanner Report</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#172033}h1{margin-bottom:4px}table{width:100%;border-collapse:collapse;margin-top:24px}td,th{border:1px solid #d9dee8;padding:10px;text-align:left}pre{white-space:pre-wrap;background:#f5f7fb;padding:16px;border-radius:10px}.score{font-size:36px;font-weight:700}</style></head><body><h1>LegalMetriX Scanner</h1><p>Inspection screening report</p><p class="score">${safe(displayScore)}/100</p><p><b>Product:</b> ${safe(payload.product)}<br><b>Status:</b> ${safe(displayStatus)}<br><b>OCR:</b> ${safe(ocrProvider)} (${safe(confidence)}%)<br><b>Generated:</b> ${safe(new Date().toLocaleString())}</p><h2>Declaration checks</h2><table><thead><tr><th>Requirement</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table><h2>Extracted label text</h2><pre>${safe(ocrText)}</pre><p><small>Screening aid only. Findings must be verified against the current applicable Legal Metrology rules and amendments before enforcement action.</small></p></body></html>`;
+    downloadBlob(html, 'text/html;charset=utf-8', `legalmetrix-scanner-report-${Date.now()}.html`);
   }
 
   return <div className="app-shell">
