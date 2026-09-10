@@ -23,6 +23,8 @@ const FIELD_PATTERNS = {
   consumerCare: /(consumer care|customer care|helpline|toll[- ]free|contact us|email)/i,
 };
 
+function PhotoPreview({ file, index, onRemove }) { const [src, setSrc] = useState(''); React.useEffect(() => { const u = URL.createObjectURL(file); setSrc(u); return () => URL.revokeObjectURL(u); }, [file]); return <div className="photo-thumb"><img src={src} alt={`Product photo ${index + 1}`} /><button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(index); }}>×</button></div>; }
+
 function App() {
   const [file, setFile] = useState(null);
   const [files, setFiles] = useState([]);
@@ -86,7 +88,7 @@ function App() {
   function downloadReport() {
     const report = { productImages: files.map(f => f.name), generatedAt: new Date().toISOString(), ocrConfidence: confidence, score: displayScore, status: displayStatus, checks: displayChecks, extractedText: ocrText, note: 'Prototype screening report. Verify findings against the current applicable Legal Metrology rules/amendments before enforcement action.' };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `legalmetrix-scanner-report-${Date.now()}.json`; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `legalmetrix-scanner-report-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 
   return <div className="app-shell">
@@ -101,13 +103,13 @@ function App() {
           <input ref={galleryRef} className="hidden-input" type="file" accept="image/*" multiple onChange={e => handleFiles(e.target.files)} />
           <div className="scan-actions"><button className="camera-btn" onClick={() => cameraRef.current?.click()}><span>⌾</span><b>Add Product Photo</b><small>Capture another side</small></button><button className="gallery-btn" onClick={() => galleryRef.current?.click()}><span>▧</span><b>Add from Gallery</b><small>Select multiple photos</small></button></div>
           <label className="dropzone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}>
-            {files.length ? <div className="photo-grid">{files.map((f, i) => <div className="photo-thumb" key={`${f.name}-${i}`}><img src={URL.createObjectURL(f)} alt={`Product photo ${i + 1}`} /><button type="button" onClick={(e) => { e.preventDefault(); removePhoto(i); }}>×</button></div>)}</div> : <><div className="upload-icon">↑</div><strong>Drop one or more label images here</strong><span>For round/cylindrical packs, capture multiple sides</span></>}
+            {files.length ? <div className="photo-grid">{files.map((f, i) => <PhotoPreview key={`${f.name}-${i}`} file={f} index={i} onRemove={removePhoto} />)}</div> : <><div className="upload-icon">↑</div><strong>Drop one or more label images here</strong><span>For round/cylindrical packs, capture multiple sides</span></>}
           </label>
           {files.length > 0 && <div className="file-row"><span>{files.length} photo{files.length > 1 ? 's' : ''} selected</span><button className="primary" onClick={scan} disabled={busy}>{busy ? `Scanning ${confidence}%` : 'Run compliance scan'}</button></div>}
           {error && <div className="error">{error}</div>}
         </div>
 
-        <div className="panel score-panel"><div className="score-ring" style={{ '--score': `${displayScore * 3.6}deg` }}><div><b>{displayScore}</b><span>/ 100</span></div></div><p className="eyebrow">COMPLIANCE SCREEN</p><h2>{displayStatus}</h2><p>{ocrText ? `${passed} of ${checks.length} core declarations detected.` : 'Scan a product to calculate the screening score.'}</p><button className="secondary" disabled={!ocrText} onClick={downloadReport}>Export inspection report</button></div>
+        <div className="panel score-panel"><div className="score-ring" style={{ '--score': `${displayScore * 3.6}deg` }}><div><b>{displayScore}</b><span>/ 100</span></div></div><p className="eyebrow">COMPLIANCE SCREEN</p><h2>{displayStatus}</h2><p>{ocrText ? `${displayChecks.filter(c => c.status === 'PASS' || c.pass).length} of ${displayChecks.length} core declarations detected.` : 'Scan a product to calculate the screening score.'}</p><button className="secondary" disabled={!ocrText} onClick={downloadReport}>Export inspection report</button></div>
       </section>
 
       <section className="panel checklist"><div className="panel-head"><div><h2>Mandatory declaration checks</h2><p>OCR findings are shown as evidence for inspector review.</p></div><span className={`status ${score >= 85 ? 'good' : score >= 60 ? 'warn' : 'bad'}`}>{status}</span></div><div className="check-grid">{displayChecks.map(c => { const pass = c.status === 'PASS' || c.pass; return <div className="check" key={c.key || c.ruleId}><span className={pass ? 'dot pass' : 'dot fail'}>{pass ? '✓' : '!'}</span><div><b>{c.title || c.label}</b><small>{ocrText ? (pass ? (c.evidence ? `Detected: ${c.evidence}` : 'Detected in label text') : 'Not confidently detected') : 'Waiting for scan'}</small></div></div>})}</div>{ocrText && <div className="evidence"><div className="panel-head"><div><h3>Extracted label text</h3><p>Review OCR before relying on a finding.</p></div></div><pre>{ocrText}</pre></div>}</section>
