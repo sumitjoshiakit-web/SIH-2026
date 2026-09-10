@@ -40,6 +40,7 @@ function App() {
   const [ocrProvider, setOcrProvider] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showAllRules, setShowAllRules] = useState(false);
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem('legalmetrix-history') || '[]'); } catch { return []; }
   });
@@ -57,6 +58,7 @@ function App() {
   const displayScore = scanResult?.score ?? fallbackScore;
   const displayStatus = scanResult?.status ? scanResult.status.replaceAll('_',' ').replace(/\b\w/g, x => x.toUpperCase()) : fallbackStatus;
   const displayChecks = scanResult?.checks || checks.map(c => ({ key: c.key, title: c.label, status: c.pass ? 'PASS' : 'REVIEW', evidence: c.pass ? 'Detected in OCR' : null }));
+  const visibleChecks = showAllRules ? displayChecks : displayChecks.slice(0, 4);
 
   function addFiles(selectedFiles) {
     const incoming = Array.from(selectedFiles || []).filter(f => f.type.startsWith('image/'));
@@ -66,7 +68,7 @@ function App() {
     setError('');
     const accepted = incoming.slice(0, remaining).map(file => ({ file, url: URL.createObjectURL(file) }));
     setFiles(prev => [...prev, ...accepted]);
-    setOcrText(''); setConfidence(0); setOcrProvider(''); setScanResult(null);
+    setOcrText(''); setConfidence(0); setOcrProvider(''); setScanResult(null); setShowAllRules(false);
   }
 
   function removePhoto(index) {
@@ -75,7 +77,7 @@ function App() {
       if (removed) URL.revokeObjectURL(removed.url);
       return prev.filter((_, i) => i !== index);
     });
-    setOcrText(''); setConfidence(0); setScanResult(null);
+    setOcrText(''); setConfidence(0); setScanResult(null); setShowAllRules(false);
   }
 
   async function tesseractFallback() {
@@ -105,7 +107,7 @@ function App() {
 
   async function scan() {
     if (!files.length || busy) return;
-    setBusy(true); setError(''); setScanResult(null);
+    setBusy(true); setError(''); setScanResult(null); setShowAllRules(false);
     try {
       let ocr;
       if (API_BASE) {
@@ -197,7 +199,7 @@ function App() {
         </div>
         <div className="panel score-panel"><div className="score-ring" style={{ '--score': `${displayScore * 3.6}deg` }}><div><b>{displayScore}</b><span>/ 100</span></div></div><p className="eyebrow">COMPLIANCE SCREEN</p><h2>{displayStatus}</h2><p>{ocrText ? `${displayChecks.filter(c => c.status === 'PASS' || c.pass).length} of ${displayChecks.length} core declarations detected.` : 'Scan a product to calculate the screening score.'}</p><button className="secondary" type="button" disabled={!ocrText} onClick={downloadReport}>Export inspection report</button></div>
       </section>
-      <section className="panel checklist"><div className="panel-head"><div><h2>Mandatory declaration checks</h2><p>AI OCR findings are shown as evidence for inspector review.</p></div><span className={`status ${displayScore >= 85 ? 'good' : displayScore >= 60 ? 'warn' : 'bad'}`}>{displayStatus}</span></div><div className="check-grid">{displayChecks.map(c => { const pass = c.status === 'PASS' || c.pass; return <div className="check" key={c.key || c.ruleId}><span className={pass ? 'dot pass' : 'dot fail'}>{pass ? '✓' : '!'}</span><div><b>{c.title || c.label}</b><small>{ocrText ? (pass ? (c.evidence ? `Detected: ${c.evidence}` : 'Detected in label text') : 'Not confidently detected') : 'Waiting for scan'}</small></div></div>; })}</div>{ocrText && <div className="evidence"><div className="panel-head"><div><h3>Extracted label text</h3><p>{ocrProvider || 'OCR'} • Review text before relying on a finding.</p></div></div><pre>{ocrText}</pre></div>}</section>
+      <section className="panel checklist"><div className="panel-head"><div><h2>Mandatory declaration checks</h2><p>AI OCR findings are shown as evidence for inspector review.</p></div><span className={`status ${displayScore >= 85 ? 'good' : displayScore >= 60 ? 'warn' : 'bad'}`}>{displayStatus}</span></div><div className="rule-summary"><span className="rule-count">{displayChecks.length} rules mapped</span><span>Showing {Math.min(4, displayChecks.length)} essential checks first</span></div><div className="check-grid">{visibleChecks.map((c, index) => { const pass = c.status === 'PASS' || c.pass; return <div className="check" key={c.key || c.ruleId}><span className={pass ? 'dot pass' : 'dot fail'}>{pass ? '✓' : '!'}</span><div><b>{c.title || c.label}</b><small>{ocrText ? (pass ? (c.evidence ? `Detected: ${c.evidence}` : 'Detected in label text') : 'Not confidently detected') : 'Waiting for scan'}</small></div></div>; })}</div>{displayChecks.length > 4 && <button className="view-all-rules" type="button" onClick={() => setShowAllRules(value => !value)} aria-expanded={showAllRules}>{showAllRules ? 'Show less ↑' : `View all ${displayChecks.length} rules ›`}</button>}{ocrText && <div className="evidence"><div className="panel-head"><div><h3>Extracted label text</h3><p>{ocrProvider || 'OCR'} • Review text before relying on a finding.</p></div></div><pre>{ocrText}</pre></div>}</section>
       <section className="panel history"><div className="panel-head"><div><h2>Inspection history</h2><p>Recent scans stored on this device.</p></div></div>{history.length === 0 ? <div className="empty">No scans yet. Your first inspection will appear here.</div> : <div className="history-list">{history.map(item => <div className="history-row" key={item.id}><span className="mini-file">IMG</span><div><b>{item.name}</b><small>{item.scannedAt}</small></div><strong>{item.score}%</strong></div>)}</div>}</section>
     </main>
     <a className="direct-scan-fab" href="/?scan=1#scanner" aria-label="Open direct scanner">⌾<span>Quick Scan</span></a>
