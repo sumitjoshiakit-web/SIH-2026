@@ -1,6 +1,6 @@
 {
   "name": "LegalMetriX Scanner",
-  "short_name": "LegalMetriX",
+  "short_name": "LegalMetriX Scanner",
   "description": "AI-assisted Legal Metrology packaged commodity compliance scanner for SIH 26034.",
   "start_url": "/?source=pwa",
   "scope": "/",
