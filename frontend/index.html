@@ -6,11 +6,15 @@
     <meta name="theme-color" content="#172033" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/app-icon.svg" type="image/svg+xml" />
-    <title>LegalMetriX Scanner — SIH 26034</title>
+    <title>LegalMatriX-Scanner — SIH 26034</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-  <script>if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));</script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+      }
+    </script>
   </body>
 </html>
