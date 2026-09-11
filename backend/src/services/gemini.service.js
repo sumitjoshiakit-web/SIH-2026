@@ -1,75 +1,41 @@
 const DEFAULT_MODEL = 'gemini-3.8-flash';
-const FALLBACK_MODELS = [
-  'gemini-3.7-flash',
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-];
+const FALLBACK_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
 
-const MAX_INLINE_IMAGE_BYTES = 19 * 1024 * 1024;
+// Gemini inline image requests are limited to 20 MB total request size.
+// Keep raw images below that limit because base64 increases payload size.
+const MAX_INLINE_IMAGE_BYTES = 14 * 1024 * 1024;
 const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
 
-const OCR_INSTRUCTIONS = `You are the high-accuracy OCR engine for LegalMetriX Scanner. Read the supplied packaged-product label photos as a document, not as a general image caption.
+const OCR_INSTRUCTIONS = `You are the high-accuracy OCR engine for LegalMetriX Scanner.
+Read the supplied packaged-product label photos as a document, not as a general image caption.
 
-OBJECTIVE: recover every actually visible character useful for Legal Metrology screening. Inspect each photo carefully and combine different sides of the same package.
+Recover every actually visible character useful for Legal Metrology screening. Inspect every photo and combine different sides of the same package.
 
-STRICT ACCURACY RULES:
-1. Transcribe only text visibly present. NEVER invent, autocomplete, infer, or correct a value because it seems likely.
-2. Preserve exact spelling, punctuation, decimal points, rupee symbols, registration numbers, dates, batch codes, phone numbers, email addresses, MRP, quantities and units.
+Rules:
+1. Transcribe only visible text. Never invent, autocomplete, infer, or correct values.
+2. Preserve exact spelling, punctuation, decimals, rupee symbols, numbers, dates, batch codes, contacts, MRP, quantities and units.
 3. Preserve English and Devanagari/Hindi text. Do not translate.
-4. Pay special attention to tiny text: MRP, Net Quantity, Mfg/Pkd, Best Before/Use By, manufacturer/packer/importer, address/PIN, FSSAI/licence numbers, consumer-care contacts, country of origin and unit sale price.
-5. If a character is genuinely unreadable, use [unclear] rather than guessing.
-6. Treat photos as different views of the same package. Remove exact duplicate lines only after preserving the clearest version.
-7. Do NOT decide compliance or legal status. OCR only.
-8. Confidence is text-legibility confidence from 0-100, not a compliance score.
+4. Pay special attention to MRP, Net Quantity, Mfg/Pkd, Best Before/Use By, manufacturer/packer/importer, address/PIN, FSSAI/licence numbers, consumer-care contacts, country of origin and unit sale price.
+5. If a character is genuinely unreadable, use [unclear] instead of guessing.
+6. Treat photos as different views of the same package and preserve the clearest version of repeated text.
+7. Do not decide compliance. OCR only.
+8. Confidence means text-legibility confidence from 0-100, not compliance.
 
-Return ONLY JSON matching the supplied schema. Put the full useful transcription in text, grouped as PHOTO 1, PHOTO 2, etc. Fields must contain the best exact visible value or an empty string.`;
+Return ONLY JSON with these top-level keys:
+productName, text, confidence, fields, notes.
 
-function buildResponseSchema() {
-  // Keep this schema compatible with the Gemini REST generateContent API.
-  // Do not use JSON Schema keywords that this endpoint/model may reject.
-  return {
-    type: 'object',
-    properties: {
-      productName: { type: 'string' },
-      text: { type: 'string' },
-      confidence: { type: 'integer' },
-      fields: {
-        type: 'object',
-        properties: {
-          manufacturer: { type: 'string' },
-          origin: { type: 'string' },
-          commodity: { type: 'string' },
-          quantity: { type: 'string' },
-          date: { type: 'string' },
-          mrp: { type: 'string' },
-          consumerCare: { type: 'string' },
-        },
-        required: [
-          'manufacturer',
-          'origin',
-          'commodity',
-          'quantity',
-          'date',
-          'mrp',
-          'consumerCare',
-        ],
-      },
-      notes: {
-        type: 'array',
-        items: { type: 'string' },
-      },
-    },
-    required: ['productName', 'text', 'confidence', 'fields', 'notes'],
-  };
-}
+fields must contain:
+manufacturer, origin, commodity, quantity, date, mrp, consumerCare.
+Use an empty string when a value is not visible. notes must be an array of strings. Put the useful transcription in text, grouped as PHOTO 1, PHOTO 2, etc.`;
 
 function buildRequestBody(parts) {
+  // Intentionally use JSON mode without responseSchema.
+  // This avoids the response_schema parser error seen in the deployed API.
   return {
     contents: [{ role: 'user', parts }],
     generationConfig: {
       responseMimeType: 'application/json',
       maxOutputTokens: 8192,
-      responseSchema: buildResponseSchema(),
     },
   };
 }
@@ -78,12 +44,12 @@ function getGeminiUrl(model) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 }
 
-function isRetryable(status) {
-  return RETRYABLE_STATUS_CODES.includes(status);
-}
-
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isRetryable(status) {
+  return RETRYABLE_STATUS_CODES.includes(status);
 }
 
 async function callModel(model, parts, apiKey) {
@@ -108,10 +74,16 @@ async function callModel(model, parts, apiKey) {
     }
 
     const error = new Error(
-      payload?.error?.message ||
-        `Gemini request failed with HTTP ${response.status}.`,
+      payload?.error?.message || `Gemini request failed with HTTP ${response.status}.`,
     );
     error.status = response.status;
+    throw error;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      const timeoutError = new Error('Gemini OCR request timed out after 60 seconds.');
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -147,17 +119,52 @@ function extractText(payload) {
 }
 
 function parseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const match = String(text).match(/\{[\s\S]*\}/);
+  const cleanText = String(text || '')
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 
-    if (!match) {
-      throw new Error('AI returned an invalid OCR response.');
+  try {
+    return JSON.parse(cleanText);
+  } catch {
+    const start = cleanText.indexOf('{');
+    const end = cleanText.lastIndexOf('}');
+
+    if (start === -1 || end <= start) {
+      throw new Error('Gemini returned an invalid OCR JSON response.');
     }
 
-    return JSON.parse(match[0]);
+    try {
+      return JSON.parse(cleanText.slice(start, end + 1));
+    } catch {
+      throw new Error('Gemini returned malformed OCR JSON.');
+    }
   }
+}
+
+function normalizeOcrResult(parsed) {
+  const fields = parsed?.fields && typeof parsed.fields === 'object'
+    ? parsed.fields
+    : {};
+
+  return {
+    productName: String(parsed?.productName || 'Unknown product').trim(),
+    extractedText: String(parsed?.text || '').trim(),
+    confidence: Math.max(0, Math.min(100, Number(parsed?.confidence) || 0)),
+    fields: {
+      manufacturer: String(fields.manufacturer || '').trim(),
+      origin: String(fields.origin || '').trim(),
+      commodity: String(fields.commodity || '').trim(),
+      quantity: String(fields.quantity || '').trim(),
+      date: String(fields.date || '').trim(),
+      mrp: String(fields.mrp || '').trim(),
+      consumerCare: String(fields.consumerCare || '').trim(),
+    },
+    notes: Array.isArray(parsed?.notes)
+      ? parsed.notes.map((note) => String(note)).filter(Boolean)
+      : [],
+  };
 }
 
 export async function extractLabelText({ files, apiKey, model = DEFAULT_MODEL }) {
@@ -165,15 +172,14 @@ export async function extractLabelText({ files, apiKey, model = DEFAULT_MODEL })
     throw new Error('GEMINI_API_KEY is not configured on the backend.');
   }
 
-  const preparedImages = files;
-  const totalBytes = preparedImages.reduce(
+  const totalBytes = files.reduce(
     (total, image) => total + image.buffer.length,
     0,
   );
 
   if (totalBytes > MAX_INLINE_IMAGE_BYTES) {
     const error = new Error(
-      'The selected photos are still too large for Gemini. Please use fewer photos or lower-resolution images.',
+      'The selected photos are too large for Gemini. Please use fewer photos or lower-resolution images.',
     );
     error.status = 413;
     throw error;
@@ -181,7 +187,7 @@ export async function extractLabelText({ files, apiKey, model = DEFAULT_MODEL })
 
   const parts = [{ text: OCR_INSTRUCTIONS }];
 
-  preparedImages.forEach((image, index) => {
+  files.forEach((image, index) => {
     parts.push({ text: `PHOTO ${index + 1}` });
     parts.push({
       inline_data: {
@@ -211,26 +217,16 @@ export async function extractLabelText({ files, apiKey, model = DEFAULT_MODEL })
     throw lastError || new Error('All Gemini OCR models failed after retries.');
   }
 
-  const parsed = parseJson(extractText(result.payload));
-  const extractedText = String(parsed.text || '').trim();
+  const parsed = normalizeOcrResult(parseJson(extractText(result.payload)));
 
-  if (!extractedText) {
-    throw new Error(
-      'Gemini responded successfully but returned no readable label text.',
-    );
+  if (!parsed.extractedText) {
+    throw new Error('Gemini responded successfully but returned no readable label text.');
   }
 
   return {
     provider: 'Google Gemini Vision OCR',
     model: result.model,
-    productName: parsed.productName || 'Unknown product',
-    extractedText,
-    confidence: Math.max(
-      0,
-      Math.min(100, Number(parsed.confidence) || 0),
-    ),
-    fields: parsed.fields || {},
-    notes: Array.isArray(parsed.notes) ? parsed.notes : [],
+    ...parsed,
   };
 }
 
