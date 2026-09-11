@@ -10,9 +10,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-OCR_LANGUAGE = os.getenv("PADDLE_OCR_LANGUAGE", "en")
+OCR_LANGUAGE = os.getenv("PADDLE_OCR_LANGUAGE", "hi")
 
+# PP-OCRv5 is used because this project needs Hindi/Devanagari as well as
+# English label text. PP-OCRv5 supports Hindi; PP-OCRv6 currently does not.
 ocr = PaddleOCR(
+    ocr_version="PP-OCRv5",
     lang=OCR_LANGUAGE,
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
@@ -21,7 +24,7 @@ ocr = PaddleOCR(
 
 
 def extract_result_items(result):
-    """Normalize PaddleOCR 3.x results into plain OCR lines."""
+    """Normalize PaddleOCR results into plain OCR lines."""
     items = []
 
     for page in result:
@@ -63,6 +66,7 @@ def health():
         "ok": True,
         "service": "legalmetrix-paddleocr-fallback",
         "ocr": "PaddleOCR",
+        "model": "PP-OCRv5",
         "language": OCR_LANGUAGE,
     }
 
@@ -70,7 +74,10 @@ def health():
 @app.post("/ocr")
 async def run_ocr(images: list[UploadFile] = File(...)):
     if not images:
-        raise HTTPException(status_code=400, detail="At least one image is required.")
+        raise HTTPException(
+            status_code=400,
+            detail="At least one image is required.",
+        )
 
     all_lines = []
     confidences = []
@@ -107,7 +114,7 @@ async def run_ocr(images: list[UploadFile] = File(...)):
 
     return {
         "provider": "PaddleOCR",
-        "model": "PP-OCRv6",
+        "model": "PP-OCRv5",
         "extractedText": text,
         "confidence": confidence,
         "lines": all_lines,
