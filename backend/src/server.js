@@ -9,8 +9,8 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 8 } });
 const PORT = process.env.PORT || 5000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
-const GEMINI_FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const GEMINI_FALLBACK_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
 const GEMINI_MAX_INLINE_BYTES = 19 * 1024 * 1024;
 
 app.use(cors());
@@ -64,39 +64,23 @@ function evaluateText(text = '') {
   return { score, status, checks, visualReviewRequired, conditionalReviewRequired };
 }
 
-function extractGeminiText(payload) {
-  return (payload?.candidates || []).flatMap(candidate => candidate?.content?.parts || []).map(part => part?.text || '').join('\n').trim();
-}
-function parseJsonResponse(text) {
-  try { return JSON.parse(text); } catch (_) {}
-  const match = String(text).match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('AI returned an invalid OCR response.');
-  return JSON.parse(match[0]);
-}
+function extractGeminiText(payload) { return (payload?.candidates || []).flatMap(candidate => candidate?.content?.parts || []).map(part => part?.text || '').join('\n').trim(); }
+function parseJsonResponse(text) { try { return JSON.parse(text); } catch (_) {} const match = String(text).match(/\{[\s\S]*\}/); if (!match) throw new Error('AI returned an invalid OCR response.'); return JSON.parse(match[0]); }
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function isRetryableStatus(status) { return [408, 429, 500, 502, 503, 504].includes(status); }
 
 async function callGemini(model, parts) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const body = {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0,
-      maxOutputTokens: 8192,
-      responseSchema: {
-        type: 'object', additionalProperties: false,
-        properties: {
-          productName: { type: 'string' }, text: { type: 'string' }, confidence: { type: 'integer' },
-          fields: { type: 'object', additionalProperties: false, properties: {
-            manufacturer: { type: 'string' }, origin: { type: 'string' }, commodity: { type: 'string' }, quantity: { type: 'string' }, date: { type: 'string' }, mrp: { type: 'string' }, consumerCare: { type: 'string' },
-          }, required: ['manufacturer', 'origin', 'commodity', 'quantity', 'date', 'mrp', 'consumerCare'] },
-          notes: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['productName', 'text', 'confidence', 'fields', 'notes'],
-      },
-    },
-  };
+  const body = { contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192, responseSchema: {
+    type: 'object', additionalProperties: false,
+    properties: {
+      productName: { type: 'string' }, text: { type: 'string' }, confidence: { type: 'integer' },
+      fields: { type: 'object', additionalProperties: false, properties: {
+        manufacturer: { type: 'string' }, origin: { type: 'string' }, commodity: { type: 'string' }, quantity: { type: 'string' }, date: { type: 'string' }, mrp: { type: 'string' }, consumerCare: { type: 'string' },
+      }, required: ['manufacturer', 'origin', 'commodity', 'quantity', 'date', 'mrp', 'consumerCare'] },
+      notes: { type: 'array', items: { type: 'string' } },
+    }, required: ['productName', 'text', 'confidence', 'fields', 'notes'],
+  } } };
   let lastError = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
@@ -121,23 +105,17 @@ async function prepareImage(file) {
   return { mimeType: 'image/jpeg', buffer: output };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '2.4.0', ai: Boolean(GEMINI_API_KEY), model: GEMINI_MODEL, rules: RULES.length }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '2.4.1', ai: Boolean(GEMINI_API_KEY), model: GEMINI_MODEL, rules: RULES.length }));
 app.get('/api/rules', (_req, res) => res.json({ framework: 'Legal Metrology (Packaged Commodities) Rules, 2011 screening map', ruleCount: RULES.length, rules: RULES.map(({ pattern, ...rule }) => rule) }));
-app.post('/api/inspections', upload.array('images', 8), (req, res) => {
-  if (!req.files?.length) return res.status(400).json({ error: 'At least one image is required' });
-  const inspectionId = crypto.randomUUID();
-  res.status(201).json({ inspectionId, files: req.files.map(file => ({ filename: file.originalname, mimeType: file.mimetype, size: file.size })), message: 'Images accepted.' });
-});
+app.post('/api/inspections', upload.array('images', 8), (req, res) => { if (!req.files?.length) return res.status(400).json({ error: 'At least one image is required' }); const inspectionId = crypto.randomUUID(); res.status(201).json({ inspectionId, files: req.files.map(file => ({ filename: file.originalname, mimeType: file.mimetype, size: file.size })), message: 'Images accepted.' }); });
 
 app.post('/api/ocr', upload.array('images', 8), async (req, res) => {
   if (!req.files?.length) return res.status(400).json({ error: 'At least one product image is required' });
   if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the backend.' });
   try {
-    const prepared = [];
-    for (const file of req.files) prepared.push(await prepareImage(file));
+    const prepared = []; for (const file of req.files) prepared.push(await prepareImage(file));
     const totalBytes = prepared.reduce((sum, item) => sum + item.buffer.length, 0);
     if (totalBytes > GEMINI_MAX_INLINE_BYTES) return res.status(413).json({ error: 'The selected photos are still too large for Gemini. Please use fewer photos or lower-resolution images.' });
-
     const parts = [{ text: `You are the high-accuracy OCR engine for LegalMetriX Scanner. Read the supplied packaged-product label photos as a document, not as a general image caption.
 
 OBJECTIVE: recover every actually visible character useful for Legal Metrology screening. Inspect each photo carefully and combine different sides of the same package.
@@ -152,47 +130,18 @@ STRICT ACCURACY RULES:
 7. Do NOT decide compliance or legal status. OCR only.
 8. Confidence is text-legibility confidence from 0-100, not a compliance score.
 
-Return ONLY JSON matching the supplied schema. Put the full useful transcription in `text`, grouped as PHOTO 1, PHOTO 2, etc. Fields must contain the best exact visible value or an empty string.` }];
+Return ONLY JSON matching the supplied schema. Put the full useful transcription in text, grouped as PHOTO 1, PHOTO 2, etc. Fields must contain the best exact visible value or an empty string.` }];
     prepared.forEach((image, index) => { parts.push({ text: `PHOTO ${index + 1}` }); parts.push({ inline_data: { mime_type: image.mimeType, data: image.buffer.toString('base64') } }); });
-
-    const models = [...new Set([GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS])];
-    let result = null; let lastError = null;
-    for (const model of models) {
-      try { result = await callGemini(model, parts); break; }
-      catch (error) { lastError = error; console.warn(`Gemini OCR failed on ${model}: ${error?.message || error}`); }
-    }
-    if (!result) {
-      const safeMessage = lastError?.message || 'All Gemini OCR models failed after retries.';
-      console.error('Gemini OCR final failure:', { status: lastError?.status, message: safeMessage });
-      return res.status(502).json({ error: `Gemini OCR failed: ${safeMessage}` });
-    }
-    const parsed = parseJsonResponse(extractGeminiText(result.payload));
-    const text = String(parsed.text || '').trim();
+    const models = [...new Set([GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS])]; let result = null; let lastError = null;
+    for (const model of models) { try { result = await callGemini(model, parts); break; } catch (error) { lastError = error; console.warn(`Gemini OCR failed on ${model}: ${error?.message || error}`); } }
+    if (!result) { const safeMessage = lastError?.message || 'All Gemini OCR models failed after retries.'; console.error('Gemini OCR final failure:', { status: lastError?.status, message: safeMessage }); return res.status(502).json({ error: `Gemini OCR failed: ${safeMessage}` }); }
+    const parsed = parseJsonResponse(extractGeminiText(result.payload)); const text = String(parsed.text || '').trim();
     if (!text) return res.status(502).json({ error: 'Gemini responded successfully but returned no readable label text.' });
     res.json({ provider: 'Google Gemini Vision OCR', model: result.model, productName: parsed.productName || 'Unknown product', extractedText: text, confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 0)), fields: parsed.fields || {}, notes: Array.isArray(parsed.notes) ? parsed.notes : [], photoCount: req.files.length });
-  } catch (error) {
-    console.error('AI OCR error:', error);
-    if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Each image must be 8 MB or smaller.' });
-    res.status(502).json({ error: error?.message || 'AI OCR failed.' });
-  }
+  } catch (error) { console.error('AI OCR error:', error); if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Each image must be 8 MB or smaller.' }); res.status(502).json({ error: error?.message || 'AI OCR failed.' }); }
 });
 
-app.post('/api/inspections/analyze', (req, res) => {
-  const { extractedText = '', productName = 'Unknown product', ocrConfidence = null } = req.body;
-  if (!String(extractedText).trim()) return res.status(400).json({ error: 'extractedText is required' });
-  const evaluation = evaluateText(extractedText);
-  res.status(200).json({ inspectionId: crypto.randomUUID(), productName, ocrConfidence, generatedAt: new Date().toISOString(), ...evaluation, disclaimer: 'Screening aid only. OCR/text screening cannot establish every visual, measurement, applicability, commodity-specific or amendment-specific requirement. Findings must be verified against the current applicable Legal Metrology rules and amendments before enforcement action.' });
-});
-
+app.post('/api/inspections/analyze', (req, res) => { const { extractedText = '', productName = 'Unknown product', ocrConfidence = null } = req.body; if (!String(extractedText).trim()) return res.status(400).json({ error: 'extractedText is required' }); const evaluation = evaluateText(extractedText); res.status(200).json({ inspectionId: crypto.randomUUID(), productName, ocrConfidence, generatedAt: new Date().toISOString(), ...evaluation, disclaimer: 'Screening aid only. OCR/text screening cannot establish every visual, measurement, applicability, commodity-specific or amendment-specific requirement. Findings must be verified against the current applicable Legal Metrology rules and amendments before enforcement action.' }); });
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>\"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;', "'":'&#39;' }[c])); }
-app.post('/api/reports', (req, res) => {
-  const { product, checks = [], score = 0, extractedText = '', status = 'NEEDS_REVIEW', ocrProvider = '', confidence = 0 } = req.body || {};
-  const reportId = crypto.randomUUID(); const generatedAt = new Date().toISOString();
-  if (req.body?.format === 'html') {
-    const rows = (Array.isArray(checks) ? checks : []).map(check => `<tr><td>${escapeHtml(check.ruleId || '')}</td><td>${escapeHtml(check.title || check.label)}</td><td>${escapeHtml(check.legalBasis || '')}</td><td>${escapeHtml(check.status || 'REVIEW')}</td><td>${escapeHtml(check.evidence || 'Not confidently detected')}</td></tr>`).join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LegalMetriX Inspection Report</title><style>body{font-family:Arial,sans-serif;max-width:1100px;margin:0 auto;padding:32px 20px;color:#172033}h1{margin-bottom:4px}.meta{line-height:1.7}.score{font-size:42px;font-weight:700;margin:20px 0 4px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d9dee8;padding:10px;text-align:left;vertical-align:top}th{background:#f5f7fb}pre{white-space:pre-wrap;background:#f5f7fb;padding:16px;border-radius:10px}.notice{margin-top:24px;font-size:12px;color:#5c6575}</style></head><body><h1>LegalMetriX Scanner</h1><p>Legal Metrology declaration screening report</p><p class="score">${escapeHtml(score)}/100</p><div class="meta"><b>Product:</b> ${escapeHtml(product || 'Unknown product')}<br><b>Status:</b> ${escapeHtml(status)}<br><b>OCR:</b> ${escapeHtml(ocrProvider || 'OCR')} (${escapeHtml(confidence)}%)<br><b>Report ID:</b> ${escapeHtml(reportId)}<br><b>Generated:</b> ${escapeHtml(new Date(generatedAt).toLocaleString())}</div><h2>Rule-by-rule checks</h2><table><thead><tr><th>Rule</th><th>Requirement</th><th>Legal basis</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table><h2>Extracted label text</h2><pre>${escapeHtml(extractedText)}</pre><p class="notice">Screening aid only. A photograph/OCR scan cannot by itself prove actual quantity, font size, colour contrast, placement, applicability, commodity-specific exemptions or all current amendments. Findings must be verified against the current applicable Legal Metrology requirements before enforcement action.</p></body></html>`;
-    res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="legalmetrix-report-${reportId}.html"`); return res.status(200).send(html);
-  }
-  return res.json({ reportId, generatedAt, product: product || 'Unknown product', score, status, checks, extractedText });
-});
+app.post('/api/reports', (req, res) => { const { product, checks = [], score = 0, extractedText = '', status = 'NEEDS_REVIEW', ocrProvider = '', confidence = 0 } = req.body || {}; const reportId = crypto.randomUUID(); const generatedAt = new Date().toISOString(); if (req.body?.format === 'html') { const rows = (Array.isArray(checks) ? checks : []).map(check => `<tr><td>${escapeHtml(check.ruleId || '')}</td><td>${escapeHtml(check.title || check.label)}</td><td>${escapeHtml(check.legalBasis || '')}</td><td>${escapeHtml(check.status || 'REVIEW')}</td><td>${escapeHtml(check.evidence || 'Not confidently detected')}</td></tr>`).join(''); const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LegalMetriX Inspection Report</title><style>body{font-family:Arial,sans-serif;max-width:1100px;margin:0 auto;padding:32px 20px;color:#172033}h1{margin-bottom:4px}.meta{line-height:1.7}.score{font-size:42px;font-weight:700;margin:20px 0 4px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d9dee8;padding:10px;text-align:left;vertical-align:top}th{background:#f5f7fb}pre{white-space:pre-wrap;background:#f5f7fb;padding:16px;border-radius:10px}.notice{margin-top:24px;font-size:12px;color:#5c6575}</style></head><body><h1>LegalMetriX Scanner</h1><p>Legal Metrology declaration screening report</p><p class="score">${escapeHtml(score)}/100</p><div class="meta"><b>Product:</b> ${escapeHtml(product || 'Unknown product')}<br><b>Status:</b> ${escapeHtml(status)}<br><b>OCR:</b> ${escapeHtml(ocrProvider || 'OCR')} (${escapeHtml(confidence)}%)<br><b>Report ID:</b> ${escapeHtml(reportId)}<br><b>Generated:</b> ${escapeHtml(new Date(generatedAt).toLocaleString())}</div><h2>Rule-by-rule checks</h2><table><thead><tr><th>Rule</th><th>Requirement</th><th>Legal basis</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table><h2>Extracted label text</h2><pre>${escapeHtml(extractedText)}</pre><p class="notice">Screening aid only. A photograph/OCR scan cannot by itself prove actual quantity, font size, colour contrast, placement, applicability, commodity-specific exemptions or all current amendments. Findings must be verified against the current applicable Legal Metrology requirements before enforcement action.</p></body></html>`; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="legalmetrix-report-${reportId}.html"`); return res.status(200).send(html); } return res.json({ reportId, generatedAt, product: product || 'Unknown product', score, status, checks, extractedText }); });
 app.listen(PORT, () => console.log(`LegalMetriX Scanner API running on port ${PORT}`));
