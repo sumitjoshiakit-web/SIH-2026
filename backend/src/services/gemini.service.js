@@ -25,16 +25,16 @@ STRICT ACCURACY RULES:
 Return ONLY JSON matching the supplied schema. Put the full useful transcription in text, grouped as PHOTO 1, PHOTO 2, etc. Fields must contain the best exact visible value or an empty string.`;
 
 function buildResponseSchema() {
+  // Keep this schema compatible with the Gemini REST generateContent API.
+  // Do not use JSON Schema keywords that this endpoint/model may reject.
   return {
     type: 'object',
-    additionalProperties: false,
     properties: {
       productName: { type: 'string' },
       text: { type: 'string' },
       confidence: { type: 'integer' },
       fields: {
         type: 'object',
-        additionalProperties: false,
         properties: {
           manufacturer: { type: 'string' },
           origin: { type: 'string' },
