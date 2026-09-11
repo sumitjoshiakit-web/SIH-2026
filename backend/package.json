@@ -1,9 +1,9 @@
 {
   "name": "legalmetrix-scanner-backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": { "dev": "node --watch src/server.js", "start": "node src/server.js" },
-  "dependencies": { "cors": "^2.8.5", "dotenv": "^16.4.7", "express": "^4.21.2", "multer": "^1.4.5-lts.1" },
+  "dependencies": { "cors": "^2.8.5", "dotenv": "^16.4.7", "express": "^4.21.2", "multer": "^1.4.5-lts.1", "sharp": "^0.34.3" },
   "engines": { "node": ">=18" }
 }
