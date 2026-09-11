@@ -36,6 +36,14 @@ function formatStatus(status) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function formatOcrProvider(result) {
+  const provider = result?.provider || 'AI Vision';
+  const model = result?.model ? ` • ${result.model}` : '';
+  const path = result?.ocrPath === 'paddle-fallback' ? ' • Fallback' : '';
+
+  return `${provider}${model}${path}`;
+}
+
 function downloadBlob(content, type, filename) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -196,11 +204,7 @@ function App() {
 
       setOcrText(text);
       setConfidence(nextConfidence);
-      setOcrProvider(
-        `${ocrResult.provider || 'AI Vision'}${
-          ocrResult.model ? ` • ${ocrResult.model}` : ''
-        }`,
-      );
+      setOcrProvider(formatOcrProvider(ocrResult));
 
       const result = await analyzeInspection({
         extractedText: text,
