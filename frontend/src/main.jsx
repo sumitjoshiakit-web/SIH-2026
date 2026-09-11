@@ -12,11 +12,13 @@ import HistoryPanel from './components/HistoryPanel';
 import {
   HISTORY_STORAGE_KEY,
   INITIAL_CHECKS,
-  LOGO_SRC,
   MAX_HISTORY_ITEMS,
   MAX_PHOTOS,
 } from './constants/rules';
 import { analyzeInspection, createReport, runOcr } from './services/api';
+import { registerServiceWorker } from './registerServiceWorker';
+
+registerServiceWorker();
 
 function loadHistory() {
   try {
