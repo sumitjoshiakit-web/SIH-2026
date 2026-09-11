@@ -10,6 +10,7 @@ import {
   getRuleSummary,
 } from './engine/compliance.engine.js';
 import { extractLabelText } from './services/gemini.service.js';
+import { extractWithPaddle, isPaddleConfigured } from './services/paddle.service.js';
 import { prepareImage } from './services/image.service.js';
 import { buildInspectionReport } from './services/report.service.js';
 
@@ -34,9 +35,10 @@ app.get('/api/health', (_request, response) => {
   response.json({
     ok: true,
     service: 'legalmetrix-scanner-api',
-    version: '3.0.0',
+    version: '3.1.0',
     ai: Boolean(GEMINI_API_KEY),
-    model: GEMINI_MODEL,
+    primaryOcr: GEMINI_MODEL,
+    fallbackOcr: isPaddleConfigured() ? 'PaddleOCR' : null,
     rules: getRuleSummary().ruleCount,
   });
 });
@@ -70,42 +72,66 @@ app.post('/api/ocr', upload.array('images', 8), async (request, response) => {
       .json({ error: 'At least one product image is required.' });
   }
 
-  if (!GEMINI_API_KEY) {
-    return response.status(503).json({
-      error: 'GEMINI_API_KEY is not configured on the backend.',
-    });
-  }
+  const preparedImages = await Promise.all(
+    request.files.map((file) => prepareImage(file)),
+  );
 
   try {
-    const preparedImages = await Promise.all(
-      request.files.map((file) => prepareImage(file)),
-    );
-
-    const result = await extractLabelText({
+    const geminiResult = await extractLabelText({
       files: preparedImages,
       apiKey: GEMINI_API_KEY,
       model: GEMINI_MODEL,
     });
 
     return response.json({
-      ...result,
+      ...geminiResult,
+      ocrPath: 'gemini',
       photoCount: request.files.length,
     });
-  } catch (error) {
-    console.error('AI OCR error:', {
-      status: error?.status,
-      message: error?.message,
+  } catch (geminiError) {
+    console.warn('Gemini OCR failed. Starting PaddleOCR fallback.', {
+      status: geminiError?.status,
+      message: geminiError?.message,
     });
 
-    if (error?.code === 'LIMIT_FILE_SIZE') {
-      return response
-        .status(413)
-        .json({ error: 'Each image must be 8 MB or smaller.' });
+    if (!isPaddleConfigured()) {
+      return response.status(geminiError?.status || 502).json({
+        error: geminiError?.message || 'Gemini OCR failed.',
+        ocrPath: 'gemini',
+        fallbackAvailable: false,
+      });
     }
 
-    return response.status(error?.status || 502).json({
-      error: error?.message || 'AI OCR failed.',
-    });
+    try {
+      const paddleResult = await extractWithPaddle(
+        preparedImages.map((image, index) => ({
+          ...image,
+          originalname: request.files[index]?.originalname,
+        })),
+      );
+
+      return response.json({
+        ...paddleResult,
+        ocrPath: 'paddle-fallback',
+        fallbackReason: geminiError?.message || 'Gemini OCR failed.',
+        photoCount: request.files.length,
+      });
+    } catch (paddleError) {
+      console.error('Both OCR providers failed.', {
+        gemini: geminiError?.message,
+        paddle: paddleError?.message,
+      });
+
+      return response.status(502).json({
+        error: 'Both Gemini OCR and PaddleOCR fallback failed.',
+        details: {
+          gemini: geminiError?.message || 'Gemini OCR failed.',
+          paddle: paddleError?.message || 'PaddleOCR failed.',
+        },
+        ocrPath: 'failed',
+        fallbackAvailable: true,
+      });
+    }
   }
 });
 
