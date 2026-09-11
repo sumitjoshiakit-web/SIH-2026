@@ -65,10 +65,15 @@ function App() {
 
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
+  const filesRef = useRef([]);
 
   useEffect(() => {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
 
   useEffect(() => {
     const sections = ['scanner', 'checks', 'history']
@@ -107,9 +112,9 @@ function App() {
 
   useEffect(() => {
     return () => {
-      files.forEach((item) => URL.revokeObjectURL(item.url));
+      filesRef.current.forEach((item) => URL.revokeObjectURL(item.url));
     };
-  }, [files]);
+  }, []);
 
   const checks = scanResult?.checks?.length ? scanResult.checks : INITIAL_CHECKS;
   const visibleChecks = showAllRules ? checks : checks.slice(0, 4);
