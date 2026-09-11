@@ -1,131 +1,51 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import './styles.css';
 
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-const LOGO_SRC = '/legalmetrix-logo.svg';
+import Header, { MobileNavigation } from './components/Header';
+import ScannerPanel from './components/ScannerPanel';
+import ScorePanel from './components/ScorePanel';
+import Checklist from './components/Checklist';
+import HistoryPanel from './components/HistoryPanel';
 
-const RULE_TITLES = [
-  ['LM-01', 'manufacturerIdentity', 'Manufacturer / packer / importer name'],
-  ['LM-02', 'completeAddress', 'Complete manufacturer / packer / importer address'],
-  ['LM-03', 'actualBusinessName', 'Actual corporate / business name identifiable'],
-  ['LM-04', 'origin', 'Country of origin (where applicable)'],
-  ['LM-05', 'commodity', 'Common / generic name of commodity'],
-  ['LM-06', 'multiProductDetails', 'Name + number/quantity of each product where package has multiple products'],
-  ['LM-07', 'quantity', 'Net quantity in standard unit / number'],
-  ['LM-08', 'manufactureDate', 'Month and year of manufacture / packing / applicable date declaration'],
-  ['LM-09', 'bestBefore', 'Best before / use by date where applicable'],
-  ['LM-10', 'mrp', 'Maximum Retail Price (MRP) / retail sale price'],
-  ['LM-11', 'mrpInclusiveTaxes', 'MRP stated inclusive of all taxes'],
-  ['LM-12', 'unitSalePrice', 'Unit sale price in prescribed unit where applicable'],
-  ['LM-13', 'consumerCare', 'Consumer care contact: name/address/phone/email'],
-  ['LM-14', 'dimensions', 'Dimensions where dimensions are relevant'],
-  ['LM-15', 'quantityUnits', 'Quantity uses an appropriate standard unit / number'],
-  ['LM-16', 'quantityMisleadingWords', 'No misleading quantity wording detected'],
-  ['LM-17', 'language', 'Mandatory declarations in Hindi (Devanagari) or English'],
-  ['LM-18', 'visualManner', 'Legible, prominent and prescribed presentation'],
-  ['LM-19', 'principalDisplayPanel', 'Required declarations appear on principal display panel'],
-  ['LM-20', 'contrast', 'MRP and net quantity numerals contrast with background'],
-  ['LM-21', 'quantitySpacing', 'Required clear space around quantity declaration'],
-  ['LM-22', 'outerWrapper', 'Outer wrapper/container carries required declarations where applicable'],
-];
+import {
+  HISTORY_STORAGE_KEY,
+  INITIAL_CHECKS,
+  LOGO_SRC,
+  MAX_HISTORY_ITEMS,
+  MAX_PHOTOS,
+} from './constants/rules';
+import { analyzeInspection, createReport, runOcr } from './services/api';
 
-const INITIAL_CHECKS = RULE_TITLES.map(([ruleId, key, title]) => ({
-  ruleId,
-  key,
-  title,
-  status: 'REVIEW',
-  evidence: null,
-  message: 'Waiting for AI scan.',
-}));
-
-function Icon({ name, size = 22 }) {
-  const paths = {
-    camera: (
-      <>
-        <path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
-        <circle cx="12" cy="13" r="4" />
-      </>
-    ),
-    gallery: (
-      <>
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <circle cx="8" cy="9" r="1.5" />
-        <path d="m21 16-5-5-5 6-3-3-5 5" />
-      </>
-    ),
-    upload: (
-      <>
-        <path d="M12 16V4" />
-        <path d="m7 9 5-5 5 5" />
-        <path d="M4 20h16" />
-      </>
-    ),
-    home: (
-      <>
-        <path d="m3 10 9-7 9 7v10H3z" />
-        <path d="M9 20v-6h6v6" />
-      </>
-    ),
-    check: <path d="m5 12 4 4L19 6" />,
-    clock: (
-      <>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7v5l3 2" />
-      </>
-    ),
-    x: (
-      <>
-        <path d="m6 6 12 12M18 6 6 18" />
-      </>
-    ),
-    trash: (
-      <>
-        <path d="M4 7h16M10 11v6M14 11v6" />
-        <path d="M6 7l1 13h10l1-13M9 7V4h6v3" />
-      </>
-    ),
-  };
-
-  return (
-    <svg
-      className="icon"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {paths[name]}
-    </svg>
-  );
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
 }
 
-function PhotoPreview({ item, index, onRemove }) {
-  return (
-    <div className="photo-thumb">
-      <img
-        src={item.url}
-        alt={`Product photo ${index + 1}`}
-        draggable="false"
-      />
-      <button
-        type="button"
-        aria-label={`Remove photo ${index + 1}`}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onRemove(index);
-        }}
-      >
-        <Icon name="x" size={16} />
-      </button>
-    </div>
-  );
+function formatStatus(status) {
+  if (!status) return 'Ready to scan';
+
+  return status
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function downloadBlob(content, type, filename) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
 function App() {
@@ -139,20 +59,13 @@ function App() {
   const [showAllRules, setShowAllRules] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [activeNav, setActiveNav] = useState('scanner');
-
-  const [history, setHistory] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('legalmetrix-history') || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [history, setHistory] = useState(loadHistory);
 
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem('legalmetrix-history', JSON.stringify(history));
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
   }, [history]);
 
   useEffect(() => {
@@ -164,11 +77,13 @@ function App() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const visible = entries
+        const visibleSection = entries
           .filter((entry) => entry.isIntersecting)
           .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
 
-        if (visible) setActiveNav(visible.target.id);
+        if (visibleSection) {
+          setActiveNav(visibleSection.target.id);
+        }
       },
       {
         rootMargin: '-20% 0px -55% 0px',
@@ -188,31 +103,18 @@ function App() {
     return () => clearTimeout(timer);
   }, [error]);
 
-  useEffect(
-    () => () => files.forEach((item) => URL.revokeObjectURL(item.url)),
-    [files],
-  );
+  useEffect(() => {
+    return () => {
+      files.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [files]);
 
-  const displayChecks = scanResult?.checks?.length
-    ? scanResult.checks
-    : INITIAL_CHECKS;
-  const visibleChecks = showAllRules
-    ? displayChecks
-    : displayChecks.slice(0, 4);
-  const displayScore = scanResult?.score ?? 0;
-
-  const displayStatus = scanResult?.status
-    ? scanResult.status
-        .replaceAll('_', ' ')
-        .replace(/\b\w/g, (character) => character.toUpperCase())
-    : 'Ready to scan';
-
-  const reviewCount = displayChecks.filter(
-    (check) => check.status === 'REVIEW',
-  ).length;
-  const passCount = displayChecks.filter(
-    (check) => check.status === 'PASS',
-  ).length;
+  const checks = scanResult?.checks?.length ? scanResult.checks : INITIAL_CHECKS;
+  const visibleChecks = showAllRules ? checks : checks.slice(0, 4);
+  const score = scanResult?.score ?? 0;
+  const status = formatStatus(scanResult?.status);
+  const passCount = checks.filter((check) => check.status === 'PASS').length;
+  const reviewCount = checks.filter((check) => check.status === 'REVIEW').length;
 
   function resetResults() {
     setOcrText('');
@@ -232,17 +134,17 @@ function App() {
       return;
     }
 
-    const remaining = Math.max(0, 8 - files.length);
+    const remainingSlots = MAX_PHOTOS - files.length;
 
-    if (!remaining) {
-      setError('Maximum 8 product photos can be scanned at once.');
+    if (remainingSlots <= 0) {
+      setError(`Maximum ${MAX_PHOTOS} product photos can be scanned at once.`);
       return;
     }
 
     setError('');
-    setFiles((previousFiles) => [
-      ...previousFiles,
-      ...incoming.slice(0, remaining).map((file) => ({
+    setFiles((currentFiles) => [
+      ...currentFiles,
+      ...incoming.slice(0, remainingSlots).map((file) => ({
         file,
         url: URL.createObjectURL(file),
       })),
@@ -251,10 +153,14 @@ function App() {
   }
 
   function removePhoto(index) {
-    setFiles((previousFiles) => {
-      const removed = previousFiles[index];
-      if (removed) URL.revokeObjectURL(removed.url);
-      return previousFiles.filter((_, currentIndex) => currentIndex !== index);
+    setFiles((currentFiles) => {
+      const removedFile = currentFiles[index];
+
+      if (removedFile) {
+        URL.revokeObjectURL(removedFile.url);
+      }
+
+      return currentFiles.filter((_, currentIndex) => currentIndex !== index);
     });
 
     resetResults();
@@ -263,13 +169,6 @@ function App() {
   async function scan() {
     if (!files.length || busy) return;
 
-    if (!API_BASE) {
-      setError(
-        'AI OCR backend is not configured. Set VITE_API_URL to the deployed backend URL.',
-      );
-      return;
-    }
-
     setBusy(true);
     setError('');
     setScanResult(null);
@@ -277,67 +176,43 @@ function App() {
     setConfidence(0);
 
     try {
-      const formData = new FormData();
-      files.forEach((item) => {
-        formData.append('images', item.file, item.file.name);
-      });
+      const ocrResult = await runOcr(files);
+      const text = String(ocrResult.extractedText || '').trim();
 
-      const ocrResponse = await fetch(`${API_BASE}/api/ocr`, {
-        method: 'POST',
-        body: formData,
-      });
-      const ocrBody = await ocrResponse.json().catch(() => ({}));
-
-      if (!ocrResponse.ok) {
-        throw new Error(ocrBody.error || 'AI OCR request failed.');
-      }
-
-      const text = String(ocrBody.extractedText || '').trim();
       if (!text) {
         throw new Error(
           'AI could not read the label. Capture clearer product photos and try again.',
         );
       }
 
-      const nextConfidence = Math.round(Number(ocrBody.confidence) || 0);
+      const nextConfidence = Math.round(Number(ocrResult.confidence) || 0);
+
       setOcrText(text);
       setConfidence(nextConfidence);
       setOcrProvider(
-        `${ocrBody.provider || 'AI Vision'}${
-          ocrBody.model ? ` • ${ocrBody.model}` : ''
+        `${ocrResult.provider || 'AI Vision'}${
+          ocrResult.model ? ` • ${ocrResult.model}` : ''
         }`,
       );
 
-      const analyzeResponse = await fetch(
-        `${API_BASE}/api/inspections/analyze`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            extractedText: text,
-            productName: ocrBody.productName,
-            ocrConfidence: nextConfidence,
-          }),
-        },
-      );
-      const resultBody = await analyzeResponse.json().catch(() => ({}));
+      const result = await analyzeInspection({
+        extractedText: text,
+        productName: ocrResult.productName,
+        ocrConfidence: nextConfidence,
+      });
 
-      if (!analyzeResponse.ok) {
-        throw new Error(resultBody.error || 'Compliance analysis failed.');
-      }
-
-      setScanResult(resultBody);
-      setHistory((previousHistory) => [
+      setScanResult(result);
+      setHistory((currentHistory) => [
         {
           id: crypto.randomUUID(),
           name: `${files.length} photo${files.length > 1 ? 's' : ''} • ${
-            ocrBody.productName || files[0].file.name
+            ocrResult.productName || files[0].file.name
           }`,
-          score: resultBody.score,
+          score: result.score,
           scannedAt: new Date().toLocaleString(),
         },
-        ...previousHistory,
-      ].slice(0, 12));
+        ...currentHistory,
+      ].slice(0, MAX_HISTORY_ITEMS));
     } catch (scanError) {
       setError(scanError.message || 'AI OCR failed. Try clearer label images.');
     } finally {
@@ -353,46 +228,22 @@ function App() {
     }
   }
 
-  function downloadBlob(content, type, filename) {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    setTimeout(() => URL.revokeObjectURL(url), 500);
-  }
-
   async function downloadReport() {
-    if (!ocrText || !scanResult || !API_BASE) return;
+    if (!ocrText || !scanResult) return;
 
     try {
-      const response = await fetch(`${API_BASE}/api/reports`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          format: 'html',
-          product:
-            scanResult.productName || files[0]?.file.name || 'Unknown product',
-          checks: displayChecks,
-          score: displayScore,
-          extractedText: ocrText,
-          status: displayStatus,
-          ocrProvider,
-          confidence,
-        }),
+      const report = await createReport({
+        product: scanResult.productName || files[0]?.file.name || 'Unknown product',
+        checks,
+        score,
+        extractedText: ocrText,
+        status,
+        ocrProvider,
+        confidence,
       });
 
-      if (!response.ok) {
-        throw new Error('Report generation failed.');
-      }
-
       downloadBlob(
-        await response.blob(),
+        report,
         'text/html;charset=utf-8',
         `legalmetrix-report-${Date.now()}.html`,
       );
@@ -409,23 +260,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <a
-          className="brand"
-          href="#scanner"
-          onClick={(event) => {
-            event.preventDefault();
-            scrollTo('scanner');
-          }}
-        >
-          <img
-            className="brand-logo"
-            src={LOGO_SRC}
-            alt="LegalMatriX-Scanner"
-          />
-          <span>LegalMatriX-Scanner</span>
-        </a>
-      </header>
+      <Header onNavigate={scrollTo} />
 
       <main className="page">
         <section className="hero">
@@ -442,361 +277,53 @@ function App() {
         </section>
 
         <section className="grid">
-          <div id="scanner" className="panel upload-panel">
-            <div className="panel-head">
-              <div>
-                <h2>Product scanner</h2>
-                <p>Start with a clear photo of the label.</p>
-              </div>
-              <span className="badge">
-                {ocrProvider
-                  ? `${ocrProvider.split(' • ')[0]} ${confidence}%`
-                  : 'AI OCR —'}
-              </span>
-            </div>
+          <ScannerPanel
+            files={files}
+            busy={busy}
+            confidence={confidence}
+            ocrProvider={ocrProvider}
+            error={error}
+            dragActive={dragActive}
+            cameraRef={cameraRef}
+            galleryRef={galleryRef}
+            onAddFiles={addFiles}
+            onRemovePhoto={removePhoto}
+            onScan={scan}
+            onSetDragActive={setDragActive}
+            onClearError={() => setError('')}
+          />
 
-            <input
-              ref={cameraRef}
-              className="hidden-input"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple
-              onChange={(event) => addFiles(event.target.files)}
-            />
-            <input
-              ref={galleryRef}
-              className="hidden-input"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(event) => addFiles(event.target.files)}
-            />
-
-            <div className="scan-actions">
-              <button
-                className="camera-btn"
-                type="button"
-                onClick={() => cameraRef.current?.click()}
-              >
-                <Icon name="camera" size={24} />
-                <span>
-                  <b>Add Product Photo</b>
-                  <small>Capture another side</small>
-                </span>
-              </button>
-
-              <button
-                className="gallery-btn"
-                type="button"
-                onClick={() => galleryRef.current?.click()}
-              >
-                <Icon name="gallery" size={24} />
-                <span>
-                  <b>Add from Gallery</b>
-                  <small>Select multiple photos</small>
-                </span>
-              </button>
-            </div>
-
-            <div
-              className={`dropzone ${dragActive ? 'drag-active' : ''}`}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-              }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={(event) => {
-                if (event.currentTarget === event.target) setDragActive(false);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragActive(false);
-                addFiles(event.dataTransfer.files);
-              }}
-            >
-              {files.length ? (
-                <div className="photo-grid">
-                  {files.map((item, index) => (
-                    <PhotoPreview
-                      key={`${item.file.name}-${item.file.lastModified}-${index}`}
-                      item={item}
-                      index={index}
-                      onRemove={removePhoto}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <div className="upload-icon">
-                    <Icon name="upload" size={22} />
-                  </div>
-                  <strong>
-                    {dragActive
-                      ? 'Drop images to add them'
-                      : 'Drop one or more label images here'}
-                  </strong>
-                  <span>
-                    For round/cylindrical packs, capture multiple sides
-                  </span>
-                </>
-              )}
-            </div>
-
-            {files.length > 0 && (
-              <div className="file-row">
-                <span>
-                  {files.length} photo{files.length > 1 ? 's' : ''} selected
-                </span>
-                <button
-                  className="primary"
-                  type="button"
-                  onClick={scan}
-                  disabled={busy}
-                >
-                  {busy ? `Scanning ${confidence}%` : 'Run AI compliance scan'}
-                </button>
-              </div>
-            )}
-
-            {busy && (
-              <div
-                className="scan-progress"
-                role="status"
-                aria-live="polite"
-              >
-                <div className="progress-top">
-                  <span>AI OCR → Legal Metrology analysis</span>
-                  <b>{confidence}%</b>
-                </div>
-                <div className="progress-track">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${Math.max(4, confidence)}%` }}
-                  />
-                </div>
-                <small>Using Gemini Vision AI only.</small>
-              </div>
-            )}
-
-            {error && (
-              <div className="error" role="alert">
-                <span>{error}</span>
-                <button
-                  type="button"
-                  aria-label="Dismiss error"
-                  onClick={() => setError('')}
-                >
-                  <Icon name="x" size={17} />
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="panel score-panel">
-            <div
-              className="score-ring"
-              style={{ '--score': `${displayScore * 3.6}deg` }}
-            >
-              <div>
-                <b>{displayScore}</b>
-                <span>/ 100</span>
-              </div>
-            </div>
-            <p className="eyebrow">COMPLIANCE SCREEN</p>
-            <h2>{displayStatus}</h2>
-            <p>
-              {scanResult
-                ? `${passCount} of ${displayChecks.length} declaration checks passed${
-                    reviewCount ? ` • ${reviewCount} need review` : ''
-                  }.`
-                : 'Scan a product to calculate the AI screening score.'}
-            </p>
-            <button
-              className="secondary"
-              type="button"
-              disabled={!ocrText}
-              onClick={downloadReport}
-            >
-              Export inspection report
-            </button>
-          </div>
+          <ScorePanel
+            score={score}
+            status={status}
+            hasResult={Boolean(scanResult)}
+            passCount={passCount}
+            totalChecks={checks.length}
+            reviewCount={reviewCount}
+            onDownloadReport={downloadReport}
+          />
         </section>
 
-        <section id="checks" className="panel checklist">
-          <div className="panel-head">
-            <div>
-              <h2>Mandatory declaration checks</h2>
-              <p>
-                All 22 mapped rules are visible before scanning. After
-                scanning, AI fills their status.
-              </p>
-            </div>
-            <span
-              className={`status ${
-                displayScore >= 85
-                  ? 'good'
-                  : displayScore >= 60
-                    ? 'warn'
-                    : 'bad'
-              }`}
-            >
-              {displayStatus}
-            </span>
-          </div>
+        <Checklist
+          checks={checks}
+          visibleChecks={visibleChecks}
+          showAllRules={showAllRules}
+          status={status}
+          score={score}
+          ocrText={ocrText}
+          ocrProvider={ocrProvider}
+          hasResult={Boolean(scanResult)}
+          onToggleRules={() => setShowAllRules((value) => !value)}
+        />
 
-          <div className="rules-summary">
-            <span>
-              <b>{displayChecks.length}</b> rules mapped
-            </span>
-            <span className="summary-dot">•</span>
-            <span>4 essential checks first</span>
-          </div>
-
-          <div className="check-grid">
-            {visibleChecks.map((check) => {
-              const pass = check.status === 'PASS';
-              const review =
-                check.status === 'REVIEW' || check.status === 'review';
-
-              return (
-                <div
-                  className={`check ${
-                    pass
-                      ? 'check-pass'
-                      : review
-                        ? 'check-review'
-                        : 'check-fail'
-                  }`}
-                  key={check.key || check.ruleId}
-                >
-                  <span
-                    className={`dot ${
-                      pass ? 'pass' : review ? 'review' : 'fail'
-                    }`}
-                  >
-                    {pass ? '✓' : review ? 'i' : '!'}
-                  </span>
-                  <div>
-                    <b>{check.title}</b>
-                    <small>
-                      {scanResult
-                        ? pass
-                          ? check.evidence
-                            ? `Detected: ${check.evidence}`
-                            : 'Detected in AI OCR'
-                          : review
-                            ? check.message ||
-                              'Not confidently detected — verify label'
-                            : check.evidence || 'Potential issue detected'
-                        : 'Waiting for AI scan'}
-                    </small>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {displayChecks.length > 4 && (
-            <button
-              type="button"
-              className="view-all-rules"
-              onClick={() => setShowAllRules((value) => !value)}
-            >
-              {showAllRules
-                ? 'Show less ↑'
-                : `View all ${displayChecks.length} rules ›`}
-            </button>
-          )}
-
-          {ocrText && (
-            <div className="evidence">
-              <div className="panel-head">
-                <div>
-                  <h3>Extracted label text</h3>
-                  <p>
-                    {ocrProvider} • Review AI-extracted text before relying on
-                    a finding.
-                  </p>
-                </div>
-              </div>
-              <pre>{ocrText}</pre>
-            </div>
-          )}
-        </section>
-
-        <section id="history" className="panel history">
-          <div className="panel-head">
-            <div>
-              <h2>Inspection history</h2>
-              <p>Recent scans stored on this device.</p>
-            </div>
-            {history.length > 0 && (
-              <button
-                className="clear-history"
-                type="button"
-                onClick={clearHistory}
-              >
-                <Icon name="trash" size={15} /> Clear history
-              </button>
-            )}
-          </div>
-
-          {history.length === 0 ? (
-            <div className="empty">
-              No scans yet. Your first inspection will appear here.
-            </div>
-          ) : (
-            <div className="history-list">
-              {history.map((item) => (
-                <div className="history-row" key={item.id}>
-                  <span className="mini-file">IMG</span>
-                  <div>
-                    <b>{item.name}</b>
-                    <small>{item.scannedAt}</small>
-                  </div>
-                  <strong>{item.score}%</strong>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <HistoryPanel history={history} onClear={clearHistory} />
       </main>
 
-      <nav className="mobile-nav" aria-label="Primary navigation">
-        <button
-          className={activeNav === 'scanner' ? 'active' : ''}
-          type="button"
-          aria-label="Go to Scanner"
-          aria-current={activeNav === 'scanner' ? 'page' : undefined}
-          onClick={() => scrollTo('scanner')}
-        >
-          <Icon name="home" size={20} />
-          <span>Scanner</span>
-        </button>
-        <button
-          className={activeNav === 'checks' ? 'active' : ''}
-          type="button"
-          aria-label="Go to Checks"
-          aria-current={activeNav === 'checks' ? 'page' : undefined}
-          onClick={() => scrollTo('checks')}
-        >
-          <Icon name="check" size={20} />
-          <span>Checks</span>
-        </button>
-        <button
-          className={activeNav === 'history' ? 'active' : ''}
-          type="button"
-          aria-label="Go to History"
-          aria-current={activeNav === 'history' ? 'page' : undefined}
-          onClick={() => scrollTo('history')}
-        >
-          <Icon name="clock" size={20} />
-          <span>History</span>
-        </button>
-      </nav>
+      <MobileNavigation activeNav={activeNav} onNavigate={scrollTo} />
 
-      <footer>Legal Metrology Scanner • Packaged Commodity Inspection</footer>
+      <footer>
+        Legal Metrology Scanner • Packaged Commodity Inspection
+      </footer>
     </div>
   );
 }
