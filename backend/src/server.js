@@ -11,8 +11,10 @@ const upload = multer({
 });
 const PORT = process.env.PORT || 5000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+// Gemini 2.0 Flash was shut down on June 1, 2026. Keep the production default
+// on the stable Gemini 3.6 Flash model recommended by Google's migration guidance.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+const GEMINI_FALLBACK_MODELS = ['gemini-3.7-flash', 'gemini-3.5-flash'];
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -115,7 +117,6 @@ async function callGemini(model, parts) {
   const body = {
     contents: [{ role: 'user', parts }],
     generationConfig: {
-      temperature: 0.1,
       responseMimeType: 'application/json',
       responseSchema: {
         type: 'object',
@@ -162,7 +163,7 @@ async function callGemini(model, parts) {
   throw lastError || new Error(`Gemini OCR failed for ${model}.`);
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '2.2.0', ai: Boolean(GEMINI_API_KEY), model: GEMINI_MODEL, rules: RULES.length }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'legalmetrix-scanner-api', version: '2.3.0', ai: Boolean(GEMINI_API_KEY), model: GEMINI_MODEL, rules: RULES.length }));
 app.get('/api/rules', (_req, res) => res.json({ framework: 'Legal Metrology (Packaged Commodities) Rules, 2011 screening map', ruleCount: RULES.length, rules: RULES.map(({ pattern, ...rule }) => rule) }));
 
 app.post('/api/inspections', upload.array('images', 8), (req, res) => {
@@ -177,6 +178,12 @@ app.post('/api/ocr', upload.array('images', 8), async (req, res) => {
 
   try {
     const parts = [{ text: `You are the OCR engine for LegalMetriX Scanner. Inspect all supplied product-package images together. Transcribe ONLY text that is actually visible; do not guess, infer, or invent missing declarations. Preserve English and Hindi text where visible. Combine information across different sides of the same package and remove exact duplicate lines.
+
+Accuracy rules:
+1. Never treat a guessed or partially visible character as certain.
+2. Keep numbers, decimal points, units, dates, MRP values and registration numbers exactly as visible.
+3. If a value cannot be read confidently, leave that field empty and mention the uncertainty in notes.
+4. Do not decide legal compliance during OCR; only transcribe visible information.
 
 Return JSON with this exact shape:
 {
@@ -195,7 +202,7 @@ Return JSON with this exact shape:
   "notes": ["string"]
 }
 
-Confidence must be an integer from 0 to 100 and should reflect legibility of the visible text, not legal compliance. If a field is not visible, leave it empty.` }];
+Confidence must be an integer from 0 to 100 and should reflect legibility of the visible text, not legal compliance. If a field is not visible or not readable with confidence, leave it empty.` }];
 
     for (const [index, file] of req.files.entries()) {
       parts.push({ text: `PHOTO ${index + 1} (${file.originalname})` });
