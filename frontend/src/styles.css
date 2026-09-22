@@ -943,3 +943,90 @@ button:focus-visible,
     flex: 1;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Optional Supabase authentication
+   -------------------------------------------------------------------------- */
+.auth-panel,
+.auth-bar {
+  margin: 18px 6vw 0;
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 8px 30px rgba(31, 42, 63, 0.04);
+}
+
+.auth-panel {
+  max-width: 620px;
+}
+
+.auth-panel h2 {
+  font: 700 20px 'Space Grotesk';
+  margin: 0 0 5px;
+}
+
+.auth-panel p {
+  margin: 0 0 14px;
+  color: #737c8c;
+  font-size: 13px;
+}
+
+.auth-panel form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+}
+
+.auth-panel input {
+  min-width: 0;
+  border: 1px solid #d8dee8;
+  border-radius: 9px;
+  padding: 10px 11px;
+  color: var(--navy);
+  background: #fff;
+}
+
+.auth-panel input:focus {
+  outline: 3px solid rgba(37, 99, 235, 0.12);
+  border-color: #9eb5d8;
+}
+
+.auth-switch {
+  margin-top: 10px;
+  background: transparent;
+  color: var(--accent);
+  padding: 4px 0;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.auth-message,
+.auth-error {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.auth-message { color: var(--success); }
+.auth-error { color: var(--danger); }
+
+.auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+@media (max-width: 850px) {
+  .auth-panel,
+  .auth-bar {
+    margin: 12px 12px 0;
+  }
+
+  .auth-panel form {
+    grid-template-columns: 1fr;
+  }
+}
