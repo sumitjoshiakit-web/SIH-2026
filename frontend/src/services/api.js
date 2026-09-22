@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 function getApiUrl(path) {
@@ -8,6 +10,15 @@ function getApiUrl(path) {
   }
 
   return `${API_BASE}${path}`;
+}
+
+async function getAuthHeaders() {
+  if (!supabase) return {};
+
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function parseResponse(response) {
@@ -21,7 +32,14 @@ async function parseResponse(response) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(getApiUrl(path), options);
+  const authHeaders = await getAuthHeaders();
+  const response = await fetch(getApiUrl(path), {
+    ...options,
+    headers: {
+      ...authHeaders,
+      ...(options.headers || {}),
+    },
+  });
   const body = await parseResponse(response);
 
   if (!response.ok) {
@@ -49,7 +67,7 @@ export async function runOcr(files) {
   });
 }
 
-export function analyzeInspection({ extractedText, productName, ocrConfidence }) {
+export function analyzeInspection({ extractedText, productName, ocrConfidence, ocrProvider }) {
   return request('/api/inspections/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -57,6 +75,7 @@ export function analyzeInspection({ extractedText, productName, ocrConfidence })
       extractedText,
       productName,
       ocrConfidence,
+      ocrProvider,
     }),
   });
 }
@@ -84,6 +103,14 @@ export function createReport({
       confidence,
     }),
   });
+}
+
+export function fetchHistory() {
+  return request('/api/history', { method: 'GET' });
+}
+
+export function clearRemoteHistory() {
+  return request('/api/history', { method: 'DELETE' });
 }
 
 export { API_BASE };
