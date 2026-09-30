@@ -390,7 +390,9 @@ function App() {
         />
 
         <HistoryPanel history={history} onClear={clearHistory} />
-      </main>
+          </main>
+        </>
+      )}
 
       <MobileNavigation activeNav={activeNav} onNavigate={scrollTo} />
 
