@@ -36,7 +36,7 @@ export default function AuthPanel({ user, onUserChange }) {
       if (result.error) throw result.error;
 
       if (mode === 'signup' && !result.data.session) {
-        setMessage('Account created. Check your email if email confirmation is enabled.');
+        setMessage('Account created. Check your email to confirm your account, then sign in.');
       } else {
         onUserChange(result.data.user || null);
       }
@@ -57,7 +57,10 @@ export default function AuthPanel({ user, onUserChange }) {
   if (user) {
     return (
       <div className="auth-bar">
-        <span>Signed in as <b>{user.email}</b></span>
+        <div>
+          <span className="auth-status-dot" aria-hidden="true" />
+          <span>Signed in as <b>{user.email}</b></span>
+        </div>
         <button type="button" className="clear-history" onClick={signOut}>
           Sign out
         </button>
@@ -66,51 +69,86 @@ export default function AuthPanel({ user, onUserChange }) {
   }
 
   return (
-    <section className="auth-panel" aria-label="Account">
-      <div>
-        <h2>{mode === 'signin' ? 'Inspector login' : 'Create inspector account'}</h2>
-        <p>Enable cloud inspection history and authenticated reports.</p>
+    <section className="auth-page" aria-label="Authentication">
+      <div className="auth-card">
+        <div className="auth-brand-mark" aria-hidden="true">LM</div>
+
+        <div className="auth-copy">
+          <p className="eyebrow">LEGALMETRIX SCANNER</p>
+          <h1>{mode === 'signin' ? 'Welcome back' : 'Create your account'}</h1>
+          <p>
+            {mode === 'signin'
+              ? 'Sign in to continue to your inspection workspace.'
+              : 'Create an account to save inspections and access your history securely.'}
+          </p>
+        </div>
+
+        <form className="auth-form" onSubmit={submit}>
+          <label>
+            <span>Email address</span>
+            <input
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              placeholder="Enter your password"
+              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+              minLength={6}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </label>
+
+          <button className="primary auth-submit" type="submit" disabled={busy}>
+            {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+
+        {message && (
+          <div className="auth-feedback success" role="status">
+            {message}
+          </div>
+        )}
+
+        {error && (
+          <div className="auth-feedback error" role="alert">
+            {error}
+          </div>
+        )}
+
+        <div className="auth-divider">
+          <span>OR</span>
+        </div>
+
+        <p className="auth-switch-text">
+          {mode === 'signin' ? "Don't have an account?" : 'Already have an account?'}
+          <button
+            className="auth-switch"
+            type="button"
+            onClick={() => {
+              setMode(mode === 'signin' ? 'signup' : 'signin');
+              setError('');
+              setMessage('');
+            }}
+          >
+            {mode === 'signin' ? 'Create account' : 'Sign in'}
+          </button>
+        </p>
+
+        <p className="auth-note">
+          Your inspection history is linked to your authenticated account.
+        </p>
       </div>
-
-      <form onSubmit={submit}>
-        <input
-          type="email"
-          placeholder="Email"
-          autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-          minLength={6}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-        />
-        <button className="primary" type="submit" disabled={busy}>
-          {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
-        </button>
-      </form>
-
-      <button
-        className="auth-switch"
-        type="button"
-        onClick={() => {
-          setMode(mode === 'signin' ? 'signup' : 'signin');
-          setError('');
-          setMessage('');
-        }}
-      >
-        {mode === 'signin'
-          ? 'Need an account? Create one'
-          : 'Already have an account? Sign in'}
-      </button>
-
-      {message && <small className="auth-message">{message}</small>}
-      {error && <small className="auth-error">{error}</small>}
     </section>
   );
 }
