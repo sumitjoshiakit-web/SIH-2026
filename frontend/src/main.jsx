@@ -329,11 +329,15 @@ function App() {
     <div className="app-shell">
       <Header onNavigate={scrollTo} />
 
-      {isSupabaseConfigured && (
+      {isSupabaseConfigured && !user ? (
         <AuthPanel user={user} onUserChange={setUser} />
-      )}
+      ) : (
+        <>
+          {isSupabaseConfigured && (
+            <AuthPanel user={user} onUserChange={setUser} />
+          )}
 
-      <main className="page">
+          <main className="page">
         <section className="hero">
           <div>
             <p className="eyebrow">PACKAGED COMMODITY INSPECTION</p>
